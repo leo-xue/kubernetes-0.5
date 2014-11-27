@@ -453,6 +453,7 @@ type PodSpec struct {
 	RestartPolicy RestartPolicy `json:"restartPolicy,omitempty" yaml:"restartPolicy,omitempty"`
 	// NodeSelector is a selector which must be true for the pod to fit on a node
 	NodeSelector map[string]string `json:"nodeSelector,omitempty" yaml:"nodeSelector,omitempty"`
+	Network      Network           `json:"network" yaml:"network"`
 }
 
 // PodStatus represents information about the status of a pod. Status may trail the actual
@@ -641,6 +642,8 @@ type EndpointsList struct {
 type NodeSpec struct {
 	// Capacity represents the available resources of a node
 	Capacity ResourceList `json:"capacity,omitempty" yaml:"capacity,omitempty"`
+	//vm infomation
+	VMs []VM `json:"vms" yaml:"vms"`
 }
 
 // NodeStatus is information about the current status of a node.
@@ -989,4 +992,31 @@ type BoundPods struct {
 
 	// Items is the list of all pods bound to a given host.
 	Items []BoundPod `json:"items" yaml:"items"`
+}
+
+// Network for Pod
+type Network struct {
+	// The bridge to use.
+	Bridge string `json:"bridge,omitempty" yaml:"bridge,omitempty"`
+
+	// MacAddress contains the MAC address to set on the network interface
+	MacAddress string `json:"macAddress,omitempty" yaml:"macAddress,omitempty"`
+
+	// Address contains the IPv4 and mask to set on the network interface
+	Address string `json:"address,omitempty" yaml:"address,omitempty"`
+
+	// Gateway sets the gateway address that is used as the default for the interface
+	Gateway string `json:"gateway,omitempty" yaml:"gateway,omitempty"`
+}
+
+//vm
+type VM struct {
+	//Asset ID
+	AssetID string `json:"assetID,omitempty" yaml:"assetID,omitempty"`
+	// Address contains the IPv4 and mask to set on the network interface
+	Address string `json:"address,omitempty" yaml:"address,omitempty"`
+	// Gateway sets the gateway address that is used as the default for the interface
+	Gateway string `json:"gateway,omitempty" yaml:"gateway,omitempty"`
+	//VLAN ID
+	VlanID int `json:"vlanId,omitempty" yaml:"vlanId,omitempty"`
 }

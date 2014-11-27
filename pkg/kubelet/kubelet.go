@@ -17,10 +17,12 @@ limitations under the License.
 package kubelet
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path"
 	"sort"
 	"strconv"
@@ -656,6 +658,19 @@ func (kl *Kubelet) syncPod(pod *api.BoundPod, dockerContainers dockertools.Docke
 				return err
 			}
 		}
+
+		//TODO: setup network for net container
+		if pod.Spec.Network.Address != "" {
+			var errMsg string
+			errMsg, err = kl.setupNetwork(netID, pod)
+			if err != nil {
+				glog.Errorf("Failed to setup network for network container: %v; error msg: %s; Skipping pod %s", err, errMsg, podFullName)
+				return err
+			}
+		} else {
+			glog.V(3).Infof("Skipping setup network for pod: %s", podFullName)
+		}
+
 	}
 	containersToKeep[netID] = empty{}
 
@@ -1038,6 +1053,24 @@ func (kl *Kubelet) RunInContainer(podFullName, uuid, container string, cmd []str
 		return nil, fmt.Errorf("container not found (%s)", container)
 	}
 	return kl.runner.RunInContainer(dockerContainer.ID, cmd)
+}
+
+//setup network for net container
+func (kl *Kubelet) setupNetwork(id dockertools.DockerID, pod *api.BoundPod) (string, error) {
+	var out bytes.Buffer
+
+	network := pod.Spec.Network
+
+	//ex:"172.16.213.190/16@172.16.213.2"
+	ipAndGw := network.Address + "@" + network.Gateway
+
+	cmd := exec.Command("pipework", network.Bridge, string(id), ipAndGw)
+	cmd.Dir = "/usr/local/bin"
+	cmd.Stderr = &out
+	glog.V(4).Infof("setup network: %#v", cmd.Args)
+
+	err := cmd.Run()
+	return out.String(), err
 }
 
 // BirthCry sends an event that the kubelet has started up.
