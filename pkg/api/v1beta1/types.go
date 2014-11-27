@@ -808,5 +808,5 @@ type VM struct {
 	// Gateway sets the gateway address that is used as the default for the interface
 	Gateway string `json:"gateway,omitempty" yaml:"gateway,omitempty"`
 	//VLAN ID
-	VlanID int `json:"vlanId,omitempty" yaml:"vlanId,omitempty"`
+	VlanID int `json:"vlanID,omitempty" yaml:"vlanID,omitempty"`
 }
