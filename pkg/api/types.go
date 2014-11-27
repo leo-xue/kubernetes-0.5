@@ -643,7 +643,7 @@ type NodeSpec struct {
 	// Capacity represents the available resources of a node
 	Capacity ResourceList `json:"capacity,omitempty" yaml:"capacity,omitempty"`
 	//vm infomation
-	VMs []VM `json:"vms" yaml:"vms"`
+	VMs []VM `json:"vms,omitempty" yaml:"vms,omitempty"`
 }
 
 // NodeStatus is information about the current status of a node.

@@ -519,7 +519,7 @@ type Minion struct {
 	// Labels for the node
 	Labels map[string]string `json:"labels,omitempty" yaml:"labels,omitempty" description:"map of string keys and values that can be used to organize and categorize minions; labels of a minion assigned by the scheduler must match the scheduled pod's nodeSelector"`
 	//vm infomation
-	VMs []VM `json:"vms" yaml:"vms"`
+	VMs []VM `json:"vms,omitempty" yaml:"vms,omitempty"`
 }
 
 // MinionList is a list of minions.
