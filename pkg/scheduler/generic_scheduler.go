@@ -47,11 +47,17 @@ func (g *genericScheduler) Schedule(pod api.Pod, minionLister MinionLister) (Sel
 		return SelectedMachine{"", api.Network{}, ""}, err
 	}
 
-	index, set, _ := g.numaCpuSelect(pod, g.pods, filteredNodes)
-
+	index, set, err2 := g.numaCpuSelect(pod, g.pods, filteredNodes)
+	if index == -1 || err2 != nil {
+		return SelectedMachine{"", api.Network{},""}, fmt.Errorf("numaCpuSelect failed, %v", err2)
+	} 
+	
 	selectedMinion := filteredNodes.Items[index]
 
-	network, _ := allocNetwork(pod, g.pods, selectedMinion)
+	network, err3 := allocNetwork(pod, g.pods, selectedMinion)
+	if err3 != nil {
+		return SelectedMachine{"", api.Network{},""}, err3
+	}
 
 	cpuSet := strings.Join(set, ",")
 	return SelectedMachine{
@@ -191,11 +197,7 @@ func (g *genericScheduler) numaCpuSelect(pod api.Pod, podLister PodLister, nodes
 			}
 		}
 
-		freeCores1, err1 := cpuMap.Get1BitOffs()
-		if err1 != nil {
-			return -1, nil, err1
-		}
-
+		freeCores1 := cpuMap.Get0BitOffs()
 		if len(freeCores1) < reqCore {
 			continue
 		} else {
@@ -206,7 +208,7 @@ func (g *genericScheduler) numaCpuSelect(pod api.Pod, podLister PodLister, nodes
 			noNumaSelectMinion = index
 		}
 
-		freeCores2, err2 := cpuMap.Get1BitOffsNuma(uint(cpuNodeNum))
+		freeCores2, err2 := cpuMap.Get0BitOffsNuma(uint(cpuNodeNum))
 		if err2 != nil {
 			return -1, nil, err2
 		}
