@@ -564,8 +564,13 @@ func ValidateMinionUpdate(oldMinion *api.Minion, minion *api.Minion) errs.Valida
 	oldMinion.Labels = minion.Labels
 	// update vms
 	oldMinion.Spec.VMs = minion.Spec.VMs
+	if minion.Name != oldMinion.Name {
+		allErrs = append(allErrs, fmt.Errorf("pod name is being changed"))
+	}
+
+	minion.ObjectMeta = oldMinion.ObjectMeta
 	if !reflect.DeepEqual(oldMinion, minion) {
-		allErrs = append(allErrs, fmt.Errorf("update contains more than labels changes"))
+		allErrs = append(allErrs, fmt.Errorf("update contains more than labels/vms changes"))
 	}
 	return allErrs
 }
