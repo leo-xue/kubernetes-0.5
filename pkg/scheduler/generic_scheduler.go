@@ -178,9 +178,8 @@ func (g *genericScheduler) numaCpuSelect(pod api.Pod, podLister PodLister, nodes
 	for index, minion := range nodes.Items {
 		pods := machineToPods[minion.Name]
 
-		coreNum := resources.GetIntegerResource(minion.Spec.Capacity, resources.Core, 0)
-		//TODO: get from node.Spec
-		cpuNodeNum = 2
+		coreNum := resources.GetIntegerResource(minion.Spec.Capacity, resources.Core, 24)
+		cpuNodeNum = resources.GetIntegerResource(minion.Spec.Capacity, resources.CpuNode, 2)
 		cpuMap := bitmap.NewNumaBitmapSize(uint(coreNum), cpuNodeNum)
 
 		//get used cpu cores
