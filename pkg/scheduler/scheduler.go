@@ -20,8 +20,14 @@ import (
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api"
 )
 
+type SelectedMachine struct {
+	Name    string
+	Network api.Network
+	CpuSet  string
+}
+
 // Scheduler is an interface implemented by things that know how to schedule pods
 // onto machines.
 type Scheduler interface {
-	Schedule(api.Pod, MinionLister) (selectedMachine string, err error)
+	Schedule(api.Pod, MinionLister) (selectedMachine SelectedMachine, err error)
 }

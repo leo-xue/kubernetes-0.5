@@ -20,9 +20,13 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api"
+	"github.com/GoogleCloudPlatform/kubernetes/pkg/resources"
+	"github.com/hustcat/go-lib/bitmap"
 )
 
 type genericScheduler struct {
@@ -33,23 +37,38 @@ type genericScheduler struct {
 	randomLock  sync.Mutex
 }
 
-func (g *genericScheduler) Schedule(pod api.Pod, minionLister MinionLister) (string, error) {
+func (g *genericScheduler) Schedule(pod api.Pod, minionLister MinionLister) (SelectedMachine, error) {
 	minions, err := minionLister.List()
 	if err != nil {
-		return "", err
+		return SelectedMachine{"", api.Network{}, ""}, err
 	}
 	filteredNodes, err := findNodesThatFit(pod, g.pods, g.predicates, minions)
 	if err != nil {
-		return "", err
+		return SelectedMachine{"", api.Network{}, ""}, err
 	}
-	priorityList, err := g.prioritizer(pod, g.pods, FakeMinionLister(filteredNodes))
-	if err != nil {
-		return "", err
-	}
-	if len(priorityList) == 0 {
-		return "", fmt.Errorf("failed to find a fit for pod: %v", pod)
-	}
-	return g.selectHost(priorityList)
+
+	index, set, _ := g.numaCpuSelect(pod, g.pods, filteredNodes)
+
+	selectedMinion := filteredNodes.Items[index]
+
+	network, _ := allocNetwork(pod, g.pods, selectedMinion)
+
+	cpuSet := strings.Join(set, ",")
+	return SelectedMachine{
+		Name:    selectedMinion.Name,
+		Network: network,
+		CpuSet:  cpuSet,
+	}, nil
+	/*
+		priorityList, err := g.prioritizer(pod, g.pods, FakeMinionLister(filteredNodes))
+		if err != nil {
+			return "", err
+		}
+		if len(priorityList) == 0 {
+			return "", fmt.Errorf("failed to find a fit for pod: %v", pod)
+		}
+
+		dest,_ := g.selectHost(priorityList)*/
 }
 
 func (g *genericScheduler) selectHost(priorityList HostPriorityList) (string, error) {
@@ -128,4 +147,121 @@ func NewGenericScheduler(predicates []FitPredicate, prioritizer PriorityFunction
 		pods:        pods,
 		random:      random,
 	}
+}
+
+func (g *genericScheduler) numaCpuSelect(pod api.Pod, podLister PodLister, nodes api.MinionList) (int, []string, error) {
+	var (
+		cpuNodeNum       int
+		numaCpuSet       []string
+		numaSelectMinion int
+
+		noNumaCpuSet       []string
+		noNumaSelectMinion int
+	)
+
+	machineToPods, err := MapPodsToMachines(podLister)
+	if err != nil {
+		return -1, nil, err
+	}
+
+	reqCore := 0
+	for ix := range pod.Spec.Containers {
+		reqCore += pod.Spec.Containers[ix].Core
+	}
+
+	g.randomLock.Lock()
+	defer g.randomLock.Unlock()
+
+	numaSelectMinion = -1
+	noNumaSelectMinion = -1
+
+	for index, minion := range nodes.Items {
+		pods := machineToPods[minion.Name]
+
+		coreNum := resources.GetIntegerResource(minion.Spec.Capacity, resources.Core, 0)
+		//TODO: get from node.Spec
+		cpuNodeNum = 2
+		cpuMap := bitmap.NewNumaBitmapSize(uint(coreNum), cpuNodeNum)
+
+		//get used cpu cores
+		for _, pod := range pods {
+			set := strings.Split(pod.Status.CpuSet, ",")
+			for _, c := range set {
+				coreNo, _ := strconv.Atoi(c)
+				cpuMap.SetBit(uint(coreNo), 1)
+			}
+		}
+
+		freeCores1, err1 := cpuMap.Get1BitOffs()
+		if err1 != nil {
+			return -1, nil, err1
+		}
+
+		if len(freeCores1) < reqCore {
+			continue
+		} else {
+			for j := 0; j < reqCore; j++ {
+				off := freeCores1[j]
+				noNumaCpuSet = append(noNumaCpuSet, strconv.Itoa(int(off)))
+			}
+			noNumaSelectMinion = index
+		}
+
+		freeCores2, err2 := cpuMap.Get1BitOffsNuma(uint(cpuNodeNum))
+		if err2 != nil {
+			return -1, nil, err2
+		}
+
+		for i := 0; i < cpuNodeNum; i++ {
+			offs := freeCores2[i]
+			if len(offs) >= reqCore {
+				for j := 0; j < reqCore; j++ {
+					off := offs[j]
+					//cpuMap.SetBit(off, 1)
+					numaCpuSet = append(numaCpuSet, strconv.Itoa(int(off)))
+				}
+				numaSelectMinion = index
+			}
+		}
+
+		if numaCpuSet != nil {
+			break
+		}
+	} //minion.Items
+
+	if numaCpuSet != nil {
+		return numaSelectMinion, numaCpuSet, nil
+	} else {
+		return noNumaSelectMinion, noNumaCpuSet, nil
+	}
+}
+
+func allocNetwork(pod api.Pod, podLister PodLister, node api.Minion) (api.Network, error) {
+	var (
+		network api.Network
+	)
+
+	machineToPods, err := MapPodsToMachines(podLister)
+	if err != nil {
+		return api.Network{}, err
+	}
+
+	vms := node.Spec.VMs
+	pods := machineToPods[node.Name]
+	for i, vm := range vms {
+		used := false
+		for _, pod := range pods {
+			if vm.Address == pod.Status.Network.Address {
+				used = true
+			}
+		}
+
+		if used == false {
+			network.Address = vms[i].Address
+			network.Gateway = vms[i].Gateway
+			network.Bridge = fmt.Sprintf("br%d", vms[i].VlanID)
+			break
+		}
+	}
+	return network, nil
 }

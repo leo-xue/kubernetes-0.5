@@ -255,7 +255,11 @@ type Container struct {
 	// Optional: Defaults to unlimited.
 	Memory int `yaml:"memory,omitempty" json:"memory,omitempty" description:"memory limit in bytes; defaults to unlimited"`
 	// Optional: Defaults to unlimited.
-	CPU           int            `yaml:"cpu,omitempty" json:"cpu,omitempty" description:"CPU share in thousandths of a core"`
+	CPU int `yaml:"cpu,omitempty" json:"cpu,omitempty" description:"CPU share in thousandths of a core"`
+	// num of core
+	Core int `yaml:"core,omitempty" json:"core,omitempty" description:"CPU cores"`
+	// disk space(GB)
+	Disk          int            `yaml:"disk,omitempty" json:"disk,omitempty" description:"Disk space size in GB"`
 	VolumeMounts  []VolumeMount  `yaml:"volumeMounts,omitempty" json:"volumeMounts,omitempty" description:"pod volumes to mount into the container's filesystem"`
 	LivenessProbe *LivenessProbe `yaml:"livenessProbe,omitempty" json:"livenessProbe,omitempty" description:"periodic probe of container liveness; container will be restarted if the probe fails"`
 	Lifecycle     *Lifecycle     `yaml:"lifecycle,omitempty" json:"lifecycle,omitempty" description:"actions that the management system should take in response to container lifecycle events"`
@@ -400,6 +404,10 @@ type PodState struct {
 	// entry per container in the manifest. The value of this map is ContainerStatus for
 	// the container.
 	Info PodInfo `json:"info,omitempty" yaml:"info,omitempty" description:"map of container name to container status"`
+	// Network info
+	Network Network `json:"network,omitempty" yaml:"network,omitempty"`
+	// CPU set("1,3")
+	CpuSet string `json:"cpuSet,omitempty" yaml:"cpuSet,omitempty"`
 }
 
 // PodList is a list of Pods.
@@ -534,8 +542,10 @@ type MinionList struct {
 // Binding is written by a scheduler to cause a pod to be bound to a host.
 type Binding struct {
 	TypeMeta `json:",inline" yaml:",inline"`
-	PodID    string `json:"podID" yaml:"podID" description:"name of the pod to bind"`
-	Host     string `json:"host" yaml:"host" description:"host to which to bind the specified pod"`
+	PodID    string  `json:"podID" yaml:"podID" description:"name of the pod to bind"`
+	Host     string  `json:"host" yaml:"host" description:"host to which to bind the specified pod"`
+	Network  Network `json:"network" yaml:"network"`
+	CpuSet   string  `json:"cpuSet" yaml:"cpuSet"`
 }
 
 // Status is a return value for calls that don't return other objects.
@@ -759,7 +769,11 @@ type PodSpec struct {
 	RestartPolicy RestartPolicy `json:"restartPolicy,omitempty" yaml:"restartPolicy,omitempty" description:"restart policy for all containers within the pod; one of RestartPolicyAlways, RestartPolicyOnFailure, RestartPolicyNever"`
 	// NodeSelector is a selector which must be true for the pod to fit on a node
 	NodeSelector map[string]string `json:"nodeSelector,omitempty" yaml:"nodeSelector,omitempty" description:"selector which must match a node's labels for the pod to be scheduled on that node"`
-	Network      Network           `json:"network" yaml:"network"`
+}
+
+type BoundResource struct {
+	Network Network `json:"network,omitempty" yaml:"network,omitempty"`
+	CpuSet  string  `json:"cpuSet,omitempty" yaml:"cpuSet,omitempty"`
 }
 
 // BoundPod is a collection of containers that should be run on a host. A BoundPod
@@ -770,6 +784,9 @@ type BoundPod struct {
 
 	// Spec defines the behavior of a pod.
 	Spec PodSpec `json:"spec,omitempty" yaml:"spec,omitempty" description:"specification of the desired state of containers and volumes comprising the pod"`
+
+	// dynamic allocate resource
+	Res BoundResource `json:"res,omitempty" yaml:"res,omitempty"`
 }
 
 // BoundPods is a list of Pods bound to a common server. The resource version of

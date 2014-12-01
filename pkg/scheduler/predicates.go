@@ -91,6 +91,8 @@ type ResourceFit struct {
 type resourceRequest struct {
 	milliCPU int
 	memory   int
+	core     int
+	disk     int
 }
 
 func getResourceRequest(pod *api.Pod) resourceRequest {
@@ -98,6 +100,8 @@ func getResourceRequest(pod *api.Pod) resourceRequest {
 	for ix := range pod.Spec.Containers {
 		result.memory += pod.Spec.Containers[ix].Memory
 		result.milliCPU += pod.Spec.Containers[ix].CPU
+		result.core += pod.Spec.Containers[ix].Core
+		result.disk += pod.Spec.Containers[ix].Disk
 	}
 	return result
 }
@@ -113,23 +117,37 @@ func (r *ResourceFit) PodFitsResources(pod api.Pod, existingPods []api.Pod, node
 	if err != nil {
 		return false, err
 	}
+
+	// check wether exsit free VM
+	if len(info.Spec.VMs) <= len(existingPods) {
+		return false, nil
+	}
+
 	milliCPURequested := 0
 	memoryRequested := 0
+	coreRequested := 0
+	diskRequested := 0
 	for ix := range existingPods {
 		existingRequest := getResourceRequest(&existingPods[ix])
 		milliCPURequested += existingRequest.milliCPU
 		memoryRequested += existingRequest.memory
+		coreRequested += existingRequest.core
+		diskRequested += existingRequest.disk
 	}
 
 	// TODO: convert to general purpose resource matching, when pods ask for resources
 	totalMilliCPU := int(resources.GetFloatResource(info.Spec.Capacity, resources.CPU, 0) * 1000)
 	totalMemory := resources.GetIntegerResource(info.Spec.Capacity, resources.Memory, 0)
+	totalCore := resources.GetIntegerResource(info.Spec.Capacity, resources.Core, 0)
+	totalDisk := resources.GetIntegerResource(info.Spec.Capacity, resources.Disk, 0)
 
 	fitsCPU := totalMilliCPU == 0 || (totalMilliCPU-milliCPURequested) >= podRequest.milliCPU
 	fitsMemory := totalMemory == 0 || (totalMemory-memoryRequested) >= podRequest.memory
-	glog.V(3).Infof("Calculated fit: cpu: %s, memory %s", fitsCPU, fitsMemory)
+	fitsCore := totalCore == 0 || (totalCore-coreRequested) >= podRequest.core
+	fitsDisk := totalDisk == 0 || (totalDisk-diskRequested) >= podRequest.disk
+	glog.V(3).Infof("Calculated fit: cpu: %s, memory %s, core: %s, disk: %s", fitsCPU, fitsMemory, fitsCore, fitsDisk)
 
-	return fitsCPU && fitsMemory, nil
+	return fitsCPU && fitsMemory && fitsCore && fitsDisk, nil
 }
 
 func NewResourceFitPredicate(info NodeInfo) FitPredicate {

@@ -562,6 +562,8 @@ func ValidateMinion(minion *api.Minion) errs.ValidationErrorList {
 func ValidateMinionUpdate(oldMinion *api.Minion, minion *api.Minion) errs.ValidationErrorList {
 	allErrs := errs.ValidationErrorList{}
 	oldMinion.Labels = minion.Labels
+	// update vms
+	oldMinion.Spec.VMs = minion.Spec.VMs
 	if !reflect.DeepEqual(oldMinion, minion) {
 		allErrs = append(allErrs, fmt.Errorf("update contains more than labels changes"))
 	}

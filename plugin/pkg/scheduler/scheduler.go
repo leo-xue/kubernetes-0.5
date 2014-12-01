@@ -79,7 +79,9 @@ func (s *Scheduler) scheduleOne() {
 	b := &api.Binding{
 		ObjectMeta: api.ObjectMeta{Namespace: pod.Namespace},
 		PodID:      pod.Name,
-		Host:       dest,
+		Host:       dest.Name,
+		Network:    dest.Network,
+		CpuSet:     dest.CpuSet,
 	}
 	if err := s.config.Binder.Bind(b); err != nil {
 		glog.V(1).Infof("Failed to bind pod: %v", err)

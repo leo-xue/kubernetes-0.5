@@ -176,9 +176,13 @@ func init() {
 			if err := s.Convert(&in.Info, &out.Info, 0); err != nil {
 				return err
 			}
+			if err := s.Convert(&in.Network, &out.Network, 0); err != nil {
+				return err
+			}
 			out.Host = in.Host
 			out.HostIP = in.HostIP
 			out.PodIP = in.PodIP
+			out.CpuSet = in.CpuSet
 			return nil
 		},
 		func(in *PodState, out *newer.PodStatus, s conversion.Scope) error {
@@ -188,10 +192,14 @@ func init() {
 			if err := s.Convert(&in.Info, &out.Info, 0); err != nil {
 				return err
 			}
+			if err := s.Convert(&in.Network, &out.Network, 0); err != nil {
+				return err
+			}
 
 			out.Host = in.Host
 			out.HostIP = in.HostIP
 			out.PodIP = in.PodIP
+			out.CpuSet = in.CpuSet
 			return nil
 		},
 

@@ -461,6 +461,7 @@ func (kl *Kubelet) runContainer(pod *api.BoundPod, container *api.Container, pod
 			Image:        container.Image,
 			Memory:       int64(container.Memory),
 			CpuShares:    int64(milliCPUToShares(container.CPU)),
+			CpuSet:       pod.Res.CpuSet,
 			WorkingDir:   container.WorkingDir,
 		},
 	}
@@ -660,7 +661,7 @@ func (kl *Kubelet) syncPod(pod *api.BoundPod, dockerContainers dockertools.Docke
 		}
 
 		//TODO: setup network for net container
-		if pod.Spec.Network.Address != "" {
+		if pod.Res.Network.Address != "" {
 			var errMsg string
 			errMsg, err = kl.setupNetwork(netID, pod)
 			if err != nil {
@@ -1059,7 +1060,7 @@ func (kl *Kubelet) RunInContainer(podFullName, uuid, container string, cmd []str
 func (kl *Kubelet) setupNetwork(id dockertools.DockerID, pod *api.BoundPod) (string, error) {
 	var out bytes.Buffer
 
-	network := pod.Spec.Network
+	network := pod.Res.Network
 
 	//ex:"172.16.213.190/16@172.16.213.2"
 	ipAndGw := network.Address + "@" + network.Gateway

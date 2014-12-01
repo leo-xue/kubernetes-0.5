@@ -171,7 +171,7 @@ func (r *Registry) CreatePod(ctx api.Context, pod *api.Pod) error {
 
 // ApplyBinding implements binding's registry
 func (r *Registry) ApplyBinding(ctx api.Context, binding *api.Binding) error {
-	return etcderr.InterpretCreateError(r.assignPod(ctx, binding.PodID, binding.Host), "binding", "")
+	return etcderr.InterpretCreateError(r.assignPod(ctx, binding), "binding", "")
 }
 
 // setPodHostTo sets the given pod's host to 'machine' iff it was previously 'oldMachine'.
@@ -196,18 +196,53 @@ func (r *Registry) setPodHostTo(ctx api.Context, podID, oldMachine, machine stri
 	return finalPod, err
 }
 
+// setPodHostTo sets the given pod's host to 'machine' iff it was previously 'oldMachine'.
+// Returns the current state of the pod, or an error.
+func (r *Registry) setPodToHost(ctx api.Context, oldBind, newBind *api.Binding) (finalPod *api.Pod, err error) {
+	podID := oldBind.PodID
+	podKey, err := makePodKey(ctx, podID)
+	if err != nil {
+		return nil, err
+	}
+	err = r.AtomicUpdate(podKey, &api.Pod{}, func(obj runtime.Object) (runtime.Object, error) {
+		pod, ok := obj.(*api.Pod)
+		if !ok {
+			return nil, fmt.Errorf("unexpected object: %#v", obj)
+		}
+		if pod.Status.Host != oldBind.Host {
+			return nil, fmt.Errorf("pod %v is already assigned to host %v", pod.Name, pod.Status.Host)
+		}
+		pod.Status.Host = newBind.Host
+		pod.Status.Network = newBind.Network
+		pod.Status.CpuSet = newBind.CpuSet
+		finalPod = pod
+		return pod, nil
+	})
+	return finalPod, err
+}
+
 // assignPod assigns the given pod to the given machine.
-func (r *Registry) assignPod(ctx api.Context, podID string, machine string) error {
-	finalPod, err := r.setPodHostTo(ctx, podID, "", machine)
+func (r *Registry) assignPod(ctx api.Context, binding *api.Binding) error {
+	podID := binding.PodID
+	//finalPod, err := r.setPodHostTo(ctx, podID, "", machine)
+	oldBind := &api.Binding{
+		PodID:   podID,
+		Host:    "",
+		Network: api.Network{},
+		CpuSet:  "",
+	}
+	finalPod, err := r.setPodToHost(ctx, oldBind, binding)
 	if err != nil {
 		return err
 	}
-	boundPod, err := r.boundPodFactory.MakeBoundPod(machine, finalPod)
+	boundPod, err := r.boundPodFactory.MakeBoundPod(binding.Host, finalPod)
 	if err != nil {
 		return err
 	}
+	boundPod.Res = api.BoundResource{Network: binding.Network, CpuSet: binding.CpuSet}
+
 	// Doing the constraint check this way provides atomicity guarantees.
-	contKey := makeBoundPodsKey(machine)
+	contKey := makeBoundPodsKey(binding.Host)
 	err = r.AtomicUpdate(contKey, &api.BoundPods{}, func(in runtime.Object) (runtime.Object, error) {
 		boundPodList := in.(*api.BoundPods)
 		boundPodList.Items = append(boundPodList.Items, *boundPod)
@@ -220,7 +255,8 @@ func (r *Registry) assignPod(ctx api.Context, podID string, machine string) erro
 		// Put the pod's host back the way it was. This is a terrible hack, but
 		// can't really be helped, since there's not really a way to do atomic
 		// multi-object changes in etcd.
-		if _, err2 := r.setPodHostTo(ctx, podID, machine, ""); err2 != nil {
+		//if _, err2 := r.setPodHostTo(ctx, podID, machine, ""); err2 != nil {
+		if _, err2 := r.setPodToHost(ctx, binding, oldBind); err2 != nil {
 			glog.Errorf("Stranding pod %v; couldn't clear host after previous error: %v", podID, err2)
 		}
 	}

@@ -27,6 +27,8 @@ import (
 const (
 	CPU    api.ResourceName = "cpu"
 	Memory api.ResourceName = "memory"
+	Disk   api.ResourceName = "disk"
+	Core   api.ResourceName = "core"
 )
 
 // TODO: None of these currently handle SI units
