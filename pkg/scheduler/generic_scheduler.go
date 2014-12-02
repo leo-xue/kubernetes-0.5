@@ -41,10 +41,15 @@ func (g *genericScheduler) Schedule(pod api.Pod, minionLister MinionLister) (Sel
 	minions, err := minionLister.List()
 	if err != nil {
 		return SelectedMachine{"", api.Network{}, ""}, err
+	} else if len(minions.Items) == 0 {
+		return SelectedMachine{"", api.Network{}, ""}, fmt.Errorf("schedule MinionList is null")
 	}
+
 	filteredNodes, err := findNodesThatFit(pod, g.pods, g.predicates, minions)
 	if err != nil {
 		return SelectedMachine{"", api.Network{}, ""}, err
+	}else if len(filteredNodes.Items) == 0 {
+		return SelectedMachine{"", api.Network{}, ""}, fmt.Errorf("filtered MinionList is null")
 	}
 
 	index, set, err2 := g.numaCpuSelect(pod, g.pods, filteredNodes)
@@ -174,9 +179,6 @@ func (g *genericScheduler) numaCpuSelect(pod api.Pod, podLister PodLister, nodes
 	for ix := range pod.Spec.Containers {
 		reqCore += pod.Spec.Containers[ix].Core
 	}
-
-	g.randomLock.Lock()
-	defer g.randomLock.Unlock()
 
 	numaSelectMinion = -1
 	noNumaSelectMinion = -1
