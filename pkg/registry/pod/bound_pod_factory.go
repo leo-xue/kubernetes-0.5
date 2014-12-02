@@ -44,17 +44,20 @@ func getServiceEnvironmentVariables(ctx api.Context, registry service.Registry, 
 }
 
 func (b *BasicBoundPodFactory) MakeBoundPod(machine string, pod *api.Pod) (*api.BoundPod, error) {
+	/* service is not used(dbyin @2014-12-02)
 	envVars, err := getServiceEnvironmentVariables(api.NewContext(), b.ServiceRegistry, machine)
 	if err != nil {
 		return nil, err
-	}
+	}*/
 	boundPod := &api.BoundPod{}
 	if err := api.Scheme.Convert(pod, boundPod); err != nil {
 		return nil, err
 	}
-	for ix, container := range boundPod.Spec.Containers {
-		boundPod.Spec.Containers[ix].Env = append(container.Env, envVars...)
-	}
+	/*
+		for ix, container := range boundPod.Spec.Containers {
+			boundPod.Spec.Containers[ix].Env = append(container.Env, envVars...)
+		}
+	*/
 	// Make a dummy self link so that references to this bound pod will work.
 	boundPod.SelfLink = "/api/v1beta1/boundPods/" + boundPod.Name
 	return boundPod, nil
