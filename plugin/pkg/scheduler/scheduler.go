@@ -89,5 +89,5 @@ func (s *Scheduler) scheduleOne() {
 		s.config.Error(pod, err)
 		return
 	}
-	record.Eventf(pod, string(api.PodPending), "scheduled", "Successfully assigned %v to %v", pod.Name, dest)
+	record.Eventf(pod, string(api.PodPending), "scheduled", "Successfully assigned %v to %#v", pod.Name, dest)
 }
