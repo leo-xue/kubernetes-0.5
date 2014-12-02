@@ -65,7 +65,11 @@ func (g *genericScheduler) Schedule(pod api.Pod, minionLister MinionLister) (Sel
 		return SelectedMachine{"", api.Network{}, ""}, err3
 	}
 
-	cpuSet := strings.Join(set, ",")
+	cpuSet := ""
+	if set != nil {
+		cpuSet = strings.Join(set, ",")
+	}
+
 	return SelectedMachine{
 		Name:    selectedMinion.Name,
 		Network: network,
@@ -179,6 +183,11 @@ func (g *genericScheduler) numaCpuSelect(pod api.Pod, podLister PodLister, nodes
 	reqCore := 0
 	for ix := range pod.Spec.Containers {
 		reqCore += pod.Spec.Containers[ix].Core
+	}
+
+	//no cpuset
+	if reqCore == 0 {
+		return 0, nil, nil
 	}
 
 	numaSelectMinion = -1
