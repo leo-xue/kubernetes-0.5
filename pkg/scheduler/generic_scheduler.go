@@ -26,6 +26,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/resources"
+	"github.com/golang/glog"
 	"github.com/hustcat/go-lib/bitmap"
 )
 
@@ -48,20 +49,20 @@ func (g *genericScheduler) Schedule(pod api.Pod, minionLister MinionLister) (Sel
 	filteredNodes, err := findNodesThatFit(pod, g.pods, g.predicates, minions)
 	if err != nil {
 		return SelectedMachine{"", api.Network{}, ""}, err
-	}else if len(filteredNodes.Items) == 0 {
+	} else if len(filteredNodes.Items) == 0 {
 		return SelectedMachine{"", api.Network{}, ""}, fmt.Errorf("filtered MinionList is null")
 	}
 
 	index, set, err2 := g.numaCpuSelect(pod, g.pods, filteredNodes)
 	if index == -1 || err2 != nil {
-		return SelectedMachine{"", api.Network{},""}, fmt.Errorf("numaCpuSelect failed, %v", err2)
-	} 
-	
+		return SelectedMachine{"", api.Network{}, ""}, fmt.Errorf("numaCpuSelect failed, %v", err2)
+	}
+
 	selectedMinion := filteredNodes.Items[index]
 
 	network, err3 := allocNetwork(pod, g.pods, selectedMinion)
 	if err3 != nil {
-		return SelectedMachine{"", api.Network{},""}, err3
+		return SelectedMachine{"", api.Network{}, ""}, err3
 	}
 
 	cpuSet := strings.Join(set, ",")
@@ -224,6 +225,7 @@ func (g *genericScheduler) numaCpuSelect(pod api.Pod, podLister PodLister, nodes
 					numaCpuSet = append(numaCpuSet, strconv.Itoa(int(off)))
 				}
 				numaSelectMinion = index
+				break
 			}
 		}
 
@@ -233,8 +235,10 @@ func (g *genericScheduler) numaCpuSelect(pod api.Pod, podLister PodLister, nodes
 	} //minion.Items
 
 	if numaCpuSet != nil {
+		glog.V(3).Infof("Selected Numa CPU set: %v, Minion index: %d", numaCpuSet, numaSelectMinion)
 		return numaSelectMinion, numaCpuSet, nil
 	} else {
+		glog.V(3).Infof("Selected Uma CPU set: %v, Minion index: %d", noNumaCpuSet, noNumaSelectMinion)
 		return noNumaSelectMinion, noNumaCpuSet, nil
 	}
 }
