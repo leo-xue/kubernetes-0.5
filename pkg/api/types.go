@@ -315,6 +315,10 @@ type Container struct {
 	Privileged bool `json:"privileged,omitempty" yaml:"privileged,omitempty"`
 	// Optional: Policy for pulling images for this container
 	ImagePullPolicy PullPolicy `json:"imagePullPolicy" yaml:"imagePullPolicy"`
+	// Optional: cap-add
+	CapAdd []string `json:"capAdd,omitempty" yaml:"capAdd,omitempty"`
+	// Optional: cap-drop
+	CapDrop []string `json:"capDrop,omitempty" yaml:"capDrop,omitempty"`
 }
 
 // Handler defines a specific action that should be taken
