@@ -257,6 +257,12 @@ func allocNetwork(pod api.Pod, podLister PodLister, node api.Minion) (api.Networ
 		network api.Network
 	)
 
+	// host, nat, none
+	if pod.Spec.NetworkMode != api.PodNetworkModeBridge {
+		return api.Network{Mode: pod.Spec.NetworkMode}, nil
+	}
+
+	// bridge
 	machineToPods, err := MapPodsToMachines(podLister)
 	if err != nil {
 		return api.Network{}, err
@@ -276,6 +282,7 @@ func allocNetwork(pod api.Pod, podLister PodLister, node api.Minion) (api.Networ
 			network.Address = vms[i].Address
 			network.Gateway = vms[i].Gateway
 			network.Bridge = fmt.Sprintf("br%d", vms[i].VlanID)
+			network.Mode = pod.Spec.NetworkMode
 			break
 		}
 	}

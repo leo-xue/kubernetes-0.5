@@ -104,6 +104,9 @@ func init() {
 			if err := s.Convert(&in.RestartPolicy, &out.RestartPolicy, 0); err != nil {
 				return err
 			}
+			if err := s.Convert(&in.NetworkMode, &out.NetworkMode, 0); err != nil {
+				return err
+			}
 			out.Version = "v1beta2"
 			return nil
 		},
@@ -115,6 +118,9 @@ func init() {
 				return err
 			}
 			if err := s.Convert(&in.RestartPolicy, &out.RestartPolicy, 0); err != nil {
+				return err
+			}
+			if err := s.Convert(&in.NetworkMode, &out.NetworkMode, 0); err != nil {
 				return err
 			}
 			return nil

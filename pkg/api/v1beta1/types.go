@@ -61,6 +61,7 @@ type ContainerManifest struct {
 	Volumes       []Volume      `yaml:"volumes" json:"volumes" description:"list of volumes that can be mounted by containers belonging to the pod"`
 	Containers    []Container   `yaml:"containers" json:"containers" description:"list of containers belonging to the pod"`
 	RestartPolicy RestartPolicy `json:"restartPolicy,omitempty" yaml:"restartPolicy,omitempty" description:"restart policy for all containers within the pod; one of RestartPolicyAlways, RestartPolicyOnFailure, RestartPolicyNever"`
+	NetworkMode   string        `json:"networkMode,omitempty" yaml:"networkMode,omitempty"`
 }
 
 // ContainerManifestList is used to communicate container manifests to kubelet.
@@ -789,7 +790,7 @@ type BoundPod struct {
 	// Spec defines the behavior of a pod.
 	Spec PodSpec `json:"spec,omitempty" yaml:"spec,omitempty" description:"specification of the desired state of containers and volumes comprising the pod"`
 
-	// dynamic allocate resource
+	// Dynamic allocate resource
 	Res BoundResource `json:"res,omitempty" yaml:"res,omitempty"`
 }
 
@@ -807,6 +808,8 @@ type BoundPods struct {
 
 // Network for Pod
 type Network struct {
+	// Mode: host, nat, bridge, none
+	Mode string `json:"mode,omitempty" yaml:"mode,omitempty"`
 	// The bridge to use.
 	Bridge string `json:"bridge,omitempty" yaml:"bridge,omitempty"`
 

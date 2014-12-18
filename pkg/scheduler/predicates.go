@@ -118,8 +118,9 @@ func (r *ResourceFit) PodFitsResources(pod api.Pod, existingPods []api.Pod, node
 		return false, err
 	}
 
-	// check wether exsit free VM
-	if len(info.Spec.VMs) <= len(existingPods) {
+	// check wether exsit free VM, only for bridge mode
+	vmNum := len(info.Spec.VMs)
+	if pod.Spec.NetworkMode == api.PodNetworkModeBridge && vmNum <= len(existingPods) {
 		return false, nil
 	}
 

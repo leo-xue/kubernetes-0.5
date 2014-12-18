@@ -272,6 +272,9 @@ func init() {
 			if err := s.Convert(&in.RestartPolicy, &out.RestartPolicy, 0); err != nil {
 				return err
 			}
+			if err := s.Convert(&in.NetworkMode, &out.NetworkMode, 0); err != nil {
+				return err
+			}
 			out.Version = "v1beta2"
 			return nil
 		},
@@ -283,6 +286,9 @@ func init() {
 				return err
 			}
 			if err := s.Convert(&in.RestartPolicy, &out.RestartPolicy, 0); err != nil {
+				return err
+			}
+			if err := s.Convert(&in.NetworkMode, &out.NetworkMode, 0); err != nil {
 				return err
 			}
 			return nil
@@ -384,7 +390,9 @@ func init() {
 			if err := s.Convert(&in.ObjectMeta.Labels, &out.Labels, 0); err != nil {
 				return err
 			}
-
+			if err := s.Convert(&in.Spec.VMs, &out.VMs, 0); err != nil {
+				return err
+			}
 			out.HostIP = in.Status.HostIP
 			return s.Convert(&in.Spec.Capacity, &out.NodeResources.Capacity, 0)
 		},
@@ -398,7 +406,9 @@ func init() {
 			if err := s.Convert(&in.Labels, &out.ObjectMeta.Labels, 0); err != nil {
 				return err
 			}
-
+			if err := s.Convert(&in.VMs, &out.Spec.VMs, 0); err != nil {
+				return err
+			}
 			out.Status.HostIP = in.HostIP
 			return s.Convert(&in.NodeResources.Capacity, &out.Spec.Capacity, 0)
 		},

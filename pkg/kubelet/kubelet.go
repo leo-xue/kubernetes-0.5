@@ -633,6 +633,11 @@ func (kl *Kubelet) killContainersInPod(pod *api.BoundPod, dockerContainers docke
 type empty struct{}
 
 func (kl *Kubelet) syncPod(pod *api.BoundPod, dockerContainers dockertools.DockerContainers) error {
+	if pod.Res.Network.Mode == api.PodNetworkModeHost {
+		return kl.syncPodHostNetwork(pod, dockerContainers)
+	}
+
+	// bridge and nat will go here
 	podFullName := GetPodFullName(pod)
 	uuid := pod.UID
 	containersToKeep := make(map[dockertools.DockerID]empty)
@@ -662,7 +667,6 @@ func (kl *Kubelet) syncPod(pod *api.BoundPod, dockerContainers dockertools.Docke
 			}
 		}
 
-		//TODO: setup network for net container
 		if pod.Res.Network.Address != "" {
 			var errMsg string
 			errMsg, err = kl.setupNetwork(netID, pod)
@@ -1088,4 +1092,132 @@ func (kl *Kubelet) BirthCry() {
 		Namespace: api.NamespaceDefault,
 	}
 	record.Eventf(ref, "", "starting", "Starting kubelet.")
+}
+
+func (kl *Kubelet) syncPodHostNetwork(pod *api.BoundPod, dockerContainers dockertools.DockerContainers) error {
+	podFullName := GetPodFullName(pod)
+	uuid := pod.UID
+	containersToKeep := make(map[dockertools.DockerID]empty)
+	killedContainers := make(map[dockertools.DockerID]empty)
+
+	podVolumes, err := kl.mountExternalVolumes(pod)
+	if err != nil {
+		glog.Errorf("Unable to mount volumes for pod %s: %v; skipping pod", podFullName, err)
+		return err
+	}
+
+	podState := api.PodState{}
+	for _, container := range pod.Spec.Containers {
+		expectedHash := dockertools.HashContainer(&container)
+		if dockerContainer, found, hash := dockerContainers.FindPodContainer(podFullName, uuid, container.Name); found {
+			containerID := dockertools.DockerID(dockerContainer.ID)
+			glog.V(3).Infof("pod %s container %s exists as %v", podFullName, container.Name, containerID)
+
+			// look for changes in the container.
+			if hash == 0 || hash == expectedHash {
+				// TODO: This should probably be separated out into a separate goroutine.
+				healthy, err := kl.healthy(podFullName, uuid, podState, container, dockerContainer)
+				if err != nil {
+					glog.V(1).Infof("health check errored: %v", err)
+					containersToKeep[containerID] = empty{}
+					continue
+				}
+				if healthy == health.Healthy {
+					containersToKeep[containerID] = empty{}
+					continue
+				}
+				glog.V(1).Infof("pod %s container %s is unhealthy.", podFullName, container.Name, healthy)
+			} else {
+				glog.V(3).Infof("container hash changed %d vs %d.", hash, expectedHash)
+			}
+
+			// unhealthy or changed, kill it
+			if err := kl.killContainer(dockerContainer); err != nil {
+				glog.V(1).Infof("Failed to kill container %s: %v", dockerContainer.ID, err)
+				continue
+			}
+			killedContainers[containerID] = empty{}
+		}
+
+		// Check RestartPolicy for container
+		recentContainers, err := dockertools.GetRecentDockerContainersWithNameAndUUID(kl.dockerClient, podFullName, uuid, container.Name)
+		if err != nil {
+			glog.Errorf("Error listing recent containers with name and uuid:%s--%s--%s", podFullName, uuid, container.Name)
+			// TODO(dawnchen): error handling here?
+		}
+
+		if len(recentContainers) > 0 && pod.Spec.RestartPolicy.Always == nil {
+			if pod.Spec.RestartPolicy.Never != nil {
+				glog.V(3).Infof("Already ran container with name %s--%s--%s, do nothing",
+					podFullName, uuid, container.Name)
+				continue
+			}
+			if pod.Spec.RestartPolicy.OnFailure != nil {
+				// Check the exit code of last run
+				if recentContainers[0].State.ExitCode == 0 {
+					glog.V(3).Infof("Already successfully ran container with name %s--%s--%s, do nothing",
+						podFullName, uuid, container.Name)
+					continue
+				}
+			}
+		}
+
+		glog.V(3).Infof("Container with name %s--%s--%s doesn't exist, creating %#v", podFullName, uuid, container.Name, container)
+		ref, err := containerRef(pod, &container)
+		if err != nil {
+			glog.Errorf("Couldn't make a ref to pod %v, container %v: '%v'", pod.Name, container.Name, err)
+		}
+		if !api.IsPullNever(container.ImagePullPolicy) {
+			present, err := kl.dockerPuller.IsImagePresent(container.Image)
+			latest := dockertools.RequireLatestImage(container.Image)
+			if err != nil {
+				if ref != nil {
+					record.Eventf(ref, "failed", "failed", "Failed to inspect image %s", container.Image)
+				}
+				glog.Errorf("Failed to inspect image %s: %v; skipping pod %s container %s", container.Image, err, podFullName, container.Name)
+				continue
+			}
+			if api.IsPullAlways(container.ImagePullPolicy) ||
+				(api.IsPullIfNotPresent(container.ImagePullPolicy) && (!present || latest)) {
+				if err := kl.dockerPuller.Pull(container.Image); err != nil {
+					if ref != nil {
+
+						record.Eventf(ref, "failed", "failed", "Failed to pull image %s", container.Image)
+					}
+					glog.Errorf("Failed to pull image %s: %v; skipping pod %s container %s.", container.Image, err, podFullName, container.Name)
+					continue
+				}
+				if ref != nil {
+					record.Eventf(ref, "waiting", "pulled", "Successfully pulled image %s", container.Image)
+				}
+			}
+		}
+		// TODO(dawnchen): Check RestartPolicy.DelaySeconds before restart a container
+		containerID, err := kl.runContainer(pod, &container, podVolumes, "host")
+		if err != nil {
+			// TODO(bburns) : Perhaps blacklist a container after N failures?
+			glog.Errorf("Error running pod %s container %s: %v", podFullName, container.Name, err)
+			continue
+		}
+		containersToKeep[containerID] = empty{}
+	}
+
+	// Kill any containers in this pod which were not identified above (guards against duplicates).
+	for id, container := range dockerContainers {
+		curPodFullName, curUUID, _, _ := dockertools.ParseDockerName(container.Names[0])
+		if curPodFullName == podFullName && curUUID == uuid {
+			// Don't kill containers we want to keep or those we already killed.
+			_, keep := containersToKeep[id]
+			_, killed := killedContainers[id]
+			if !keep && !killed {
+				glog.V(1).Infof("Killing unwanted container in pod %q: %+v", curUUID, container)
+				err = kl.killContainer(container)
+				if err != nil {
+					glog.Errorf("Error killing container: %v", err)
+				}
+			}
+		}
+	}
+
+	return nil
 }
