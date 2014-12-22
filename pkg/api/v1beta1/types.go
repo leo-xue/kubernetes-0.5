@@ -772,6 +772,7 @@ type PodSpec struct {
 	Volumes       []Volume      `json:"volumes" yaml:"volumes" description:"list of volumes that can be mounted by containers belonging to the pod"`
 	Containers    []Container   `json:"containers" yaml:"containers" description:"list of containers belonging to the pod"`
 	RestartPolicy RestartPolicy `json:"restartPolicy,omitempty" yaml:"restartPolicy,omitempty" description:"restart policy for all containers within the pod; one of RestartPolicyAlways, RestartPolicyOnFailure, RestartPolicyNever"`
+	NetworkMode   string        `json:"networkMode,omitempty" yaml:"networkMode,omitempty"`
 	// NodeSelector is a selector which must be true for the pod to fit on a node
 	NodeSelector map[string]string `json:"nodeSelector,omitempty" yaml:"nodeSelector,omitempty" description:"selector which must match a node's labels for the pod to be scheduled on that node"`
 }

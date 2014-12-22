@@ -32,6 +32,7 @@ func init() {
 			out.Spec.Containers = in.Containers
 			out.Spec.Volumes = in.Volumes
 			out.Spec.RestartPolicy = in.RestartPolicy
+			out.Spec.NetworkMode = in.NetworkMode
 			out.Name = in.ID
 			out.UID = in.UUID
 			// TODO(dchen1107): Move this conversion to pkg/api/v1beta[123]/conversion.go
@@ -48,6 +49,7 @@ func init() {
 			out.Containers = in.Spec.Containers
 			out.Volumes = in.Spec.Volumes
 			out.RestartPolicy = in.Spec.RestartPolicy
+			out.NetworkMode = in.Spec.NetworkMode
 			out.Version = "v1beta2"
 			out.ID = in.Name
 			out.UUID = in.UID
