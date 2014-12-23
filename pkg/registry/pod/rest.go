@@ -98,6 +98,9 @@ func (rs *REST) Create(ctx api.Context, obj runtime.Object) (<-chan apiserver.RE
 		// See https://github.com/GoogleCloudPlatform/kubernetes/issues/148 170 & 1135
 		pod.Name = pod.UID
 	}
+	if pod.Spec.NetworkMode == "" {
+		pod.Spec.NetworkMode = api.PodNetworkModeBridge
+	}
 	if errs := validation.ValidatePod(pod); len(errs) > 0 {
 		return nil, errors.NewInvalid("pod", pod.Name, errs)
 	}
