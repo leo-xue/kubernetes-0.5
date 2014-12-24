@@ -194,6 +194,8 @@ func (g *genericScheduler) numaCpuSelect(pod api.Pod, podLister PodLister, nodes
 	noNumaSelectMinion = -1
 
 	for index, minion := range nodes.Items {
+		var set1 []string
+
 		pods := machineToPods[minion.Name]
 
 		coreNum := resources.GetIntegerResource(minion.Spec.Capacity, resources.Core, 24)
@@ -215,7 +217,9 @@ func (g *genericScheduler) numaCpuSelect(pod api.Pod, podLister PodLister, nodes
 		} else {
 			for j := 0; j < reqCore; j++ {
 				off := freeCores1[j]
-				noNumaCpuSet = append(noNumaCpuSet, strconv.Itoa(int(off)))
+				set1 = append(set1, strconv.Itoa(int(off)))
+				noNumaCpuSet = set1
+				//noNumaCpuSet = append(noNumaCpuSet, strconv.Itoa(int(off)))
 			}
 			noNumaSelectMinion = index
 		}
