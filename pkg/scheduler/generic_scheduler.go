@@ -53,6 +53,9 @@ func (g *genericScheduler) Schedule(pod api.Pod, minionLister MinionLister) (Sel
 		return SelectedMachine{"", api.Network{}, ""}, fmt.Errorf("filtered MinionList is null")
 	}
 
+	ids := getMinionListIds(filteredNodes)
+	glog.V(3).Infof("filtered Minions: %v", ids)
+
 	index, set, err2 := g.numaCpuSelect(pod, g.pods, filteredNodes)
 	if index == -1 || err2 != nil {
 		return SelectedMachine{"", api.Network{}, ""}, fmt.Errorf("numaCpuSelect failed, %v", err2)
@@ -218,9 +221,9 @@ func (g *genericScheduler) numaCpuSelect(pod api.Pod, podLister PodLister, nodes
 			for j := 0; j < reqCore; j++ {
 				off := freeCores1[j]
 				set1 = append(set1, strconv.Itoa(int(off)))
-				noNumaCpuSet = set1
 				//noNumaCpuSet = append(noNumaCpuSet, strconv.Itoa(int(off)))
 			}
+			noNumaCpuSet = set1
 			noNumaSelectMinion = index
 		}
 
@@ -248,10 +251,12 @@ func (g *genericScheduler) numaCpuSelect(pod api.Pod, podLister PodLister, nodes
 	} //minion.Items
 
 	if numaCpuSet != nil {
-		glog.V(3).Infof("Selected Numa CPU set: %v, Minion index: %d", numaCpuSet, numaSelectMinion)
+		selectNode := nodes.Items[numaSelectMinion]
+		glog.V(3).Infof("Selected Numa CPU set: %v, Minion index: %d, name: %s", numaCpuSet, numaSelectMinion, selectNode.Name)
 		return numaSelectMinion, numaCpuSet, nil
 	} else {
-		glog.V(3).Infof("Selected Uma CPU set: %v, Minion index: %d", noNumaCpuSet, noNumaSelectMinion)
+		selectNode := nodes.Items[noNumaSelectMinion]
+		glog.V(3).Infof("Selected Uma CPU set: %v, Minion index: %d, name :%s", noNumaCpuSet, noNumaSelectMinion, selectNode.Name)
 		return noNumaSelectMinion, noNumaCpuSet, nil
 	}
 }
@@ -291,4 +296,12 @@ func allocNetwork(pod api.Pod, podLister PodLister, node api.Minion) (api.Networ
 		}
 	}
 	return network, nil
+}
+
+func getMinionListIds(nodes api.MinionList) []string {
+	var ids []string
+	for _, m := range nodes.Items {
+		ids = append(ids, m.Name)
+	}
+	return ids
 }

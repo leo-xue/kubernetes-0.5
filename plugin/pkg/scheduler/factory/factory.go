@@ -20,10 +20,6 @@ package factory
 
 import (
 	"fmt"
-	"math/rand"
-	"sync"
-	"time"
-
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/client"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/client/cache"
@@ -33,6 +29,10 @@ import (
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/util"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/watch"
 	"github.com/GoogleCloudPlatform/kubernetes/plugin/pkg/scheduler"
+	"math/rand"
+	"sort"
+	"sync"
+	"time"
 
 	"github.com/golang/glog"
 )
@@ -199,15 +199,28 @@ func (factory *ConfigFactory) makeDefaultErrorFunc(backoff *podBackoff, podQueue
 	}
 }
 
+type ByCreateTime []api.Minion
+
+func (b ByCreateTime) Len() int      { return len(b) }
+func (b ByCreateTime) Swap(i, j int) { b[i], b[j] = b[j], b[i] }
+func (b ByCreateTime) Less(i, j int) bool {
+	return b[i].CreationTimestamp.Time.Before(b[j].CreationTimestamp.Time)
+}
+
 // storeToMinionLister turns a store into a minion lister. The store must contain (only) minions.
 type storeToMinionLister struct {
 	cache.Store
 }
 
 func (s *storeToMinionLister) List() (machines api.MinionList, err error) {
+	var minions []api.Minion
+
 	for _, m := range s.Store.List() {
-		machines.Items = append(machines.Items, *(m.(*api.Minion)))
+		//machines.Items = append(machines.Items, *(m.(*api.Minion)))
+		minions = append(minions, *(m.(*api.Minion)))
 	}
+	sort.Sort(ByCreateTime(minions))
+	machines.Items = minions
 	return machines, nil
 }
 
