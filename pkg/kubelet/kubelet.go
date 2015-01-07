@@ -698,6 +698,7 @@ func (kl *Kubelet) syncPod(pod *api.BoundPod, dockerContainers dockertools.Docke
 	}
 
 	for _, container := range pod.Spec.Containers {
+		containerChanged := false
 		expectedHash := dockertools.HashContainer(&container)
 		if dockerContainer, found, hash := dockerContainers.FindPodContainer(podFullName, uuid, container.Name); found {
 			containerID := dockertools.DockerID(dockerContainer.ID)
@@ -718,21 +719,24 @@ func (kl *Kubelet) syncPod(pod *api.BoundPod, dockerContainers dockertools.Docke
 				}
 				glog.V(1).Infof("pod %s container %s is unhealthy.", podFullName, container.Name, healthy)
 			} else {
+				// Upgrade
+				containerChanged = true
 				glog.V(3).Infof("container hash changed %d vs %d.", hash, expectedHash)
 			}
+
 			if err := kl.killContainer(dockerContainer); err != nil {
 				glog.V(1).Infof("Failed to kill container %s: %v", dockerContainer.ID, err)
 				continue
 			}
 			killedContainers[containerID] = empty{}
-
+			/* Never kill network container
 			// Also kill associated network container
 			if netContainer, found, _ := dockerContainers.FindPodContainer(podFullName, uuid, networkContainerName); found {
 				if err := kl.killContainer(netContainer); err != nil {
 					glog.V(1).Infof("Failed to kill network container %s: %v", netContainer.ID, err)
 					continue
 				}
-			}
+			} */
 		}
 
 		// Check RestartPolicy for container
@@ -743,7 +747,7 @@ func (kl *Kubelet) syncPod(pod *api.BoundPod, dockerContainers dockertools.Docke
 		}
 
 		if len(recentContainers) > 0 && pod.Spec.RestartPolicy.Always == nil {
-			if pod.Spec.RestartPolicy.Never != nil {
+			if pod.Spec.RestartPolicy.Never != nil && !containerChanged {
 				glog.V(3).Infof("Already ran container with name %s--%s--%s, do nothing",
 					podFullName, uuid, container.Name)
 				continue
@@ -1220,4 +1224,83 @@ func (kl *Kubelet) syncPodHostNetwork(pod *api.BoundPod, dockerContainers docker
 	}
 
 	return nil
+}
+
+func (kl *Kubelet) opPodStartContainer(pod *api.BoundPod) error {
+	// Get running container list
+	dockerContainers, err := dockertools.GetKubeletDockerContainers(kl.dockerClient, false)
+	if err != nil {
+		glog.Errorf("Error listing containers: %#v", dockerContainers)
+		return err
+	}
+
+	podFullName := GetPodFullName(pod)
+	uuid := pod.UID
+	for _, container := range pod.Spec.Containers {
+		if _, found, _ := dockerContainers.FindPodContainer(podFullName, uuid, container.Name); found {
+			glog.V(3).Infof("Container %s.%s is running, skiped.", podFullName, container.Name)
+			continue
+		}
+
+		deadContainers, err := dockertools.GetRecentDockerContainersWithNameAndUUID(kl.dockerClient, podFullName, uuid, container.Name)
+		sort.Sort(ByCreated(deadContainers))
+		latestContainer := deadContainers[0]
+		err = kl.dockerClient.StartContainer(latestContainer.ID, nil)
+		if err != nil {
+			glog.Errorf("Start container %s.%s  %s error: %v", podFullName, container.Name, latestContainer.ID, err)
+			return err
+		}
+	}
+	return nil
+}
+
+func (kl *Kubelet) opPodStopContainer(pod *api.BoundPod) error {
+	dockerContainers, err := dockertools.GetKubeletDockerContainers(kl.dockerClient, false)
+	if err != nil {
+		glog.Errorf("Error listing containers: %#v", dockerContainers)
+		return err
+	}
+
+	count, err := kl.killContainersInPod(pod, dockerContainers)
+	if err != nil {
+		glog.Errorf("Error stop containers in pod: %s", pod.Name)
+		return err
+	}
+
+	glog.V(3).Infof("Stop %d containers in pod: %s", count, pod.Name)
+	return nil
+}
+
+// OpPod stop/start container in Pod
+func (kl *Kubelet) OpPod(podFullName, op string) error {
+	var (
+		pod *api.BoundPod
+		err error
+	)
+
+	for i, size := 0, len(kl.pods); i < size; i++ {
+		p := &kl.pods[i]
+		if GetPodFullName(p) == podFullName {
+			pod = p
+			break
+		}
+	}
+
+	if pod == nil {
+		glog.Errorf("OpPod can't find pod: %s", podFullName)
+		return dockertools.ErrNoContainersInPod
+	}
+
+	switch op {
+	case "stop":
+		err = kl.opPodStopContainer(pod)
+		break
+	case "start":
+		err = kl.opPodStartContainer(pod)
+		break
+	default:
+		err = fmt.Errorf("OpPod does not support %s", op)
+	}
+
+	return err
 }

@@ -72,6 +72,7 @@ type HostInterface interface {
 	RunInContainer(name, uuid, container string, cmd []string) ([]byte, error)
 	GetKubeletContainerLogs(podFullName, containerName, tail string, follow bool, stdout, stderr io.Writer) error
 	ServeLogs(w http.ResponseWriter, req *http.Request)
+	OpPod(podFullName, podOp string) error
 }
 
 // NewServer initializes and configures a kubelet.Server object to handle HTTP requests.
@@ -95,6 +96,7 @@ func (s *Server) InstallDefaultHandlers() {
 	s.mux.HandleFunc("/boundPods", s.handleBoundPods)
 	s.mux.HandleFunc("/stats/", s.handleStats)
 	s.mux.HandleFunc("/spec/", s.handleSpec)
+	s.mux.HandleFunc("/podOp", s.handlePodOp)
 }
 
 // InstallDeguggingHandlers registers the HTTP request patterns that serve logs or run commands/containers
@@ -436,4 +438,54 @@ func (s *Server) serveStats(w http.ResponseWriter, req *http.Request) {
 	w.Header().Add("Content-type", "application/json")
 	w.Write(data)
 	return
+}
+
+// handlePodOp handles podOp requests against the Kubelet
+func (s *Server) handlePodOp(w http.ResponseWriter, req *http.Request) {
+	u, err := url.ParseRequestURI(req.RequestURI)
+	if err != nil {
+		s.error(w, err)
+		return
+	}
+	podID := u.Query().Get("podID")
+	podOp := u.Query().Get("op")
+	podNamespace := u.Query().Get("podNamespace")
+	if len(podID) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		http.Error(w, "Missing 'podID=' query entry.", http.StatusBadRequest)
+		return
+	}
+	if len(podNamespace) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		http.Error(w, "Missing 'podNamespace=' query entry.", http.StatusBadRequest)
+		return
+	}
+	// TODO: backwards compatibility with existing API, needs API change
+	podFullName := GetPodFullName(&api.BoundPod{
+		ObjectMeta: api.ObjectMeta{
+			Name:        podID,
+			Namespace:   podNamespace,
+			Annotations: map[string]string{ConfigSourceAnnotationKey: "etcd"},
+		},
+	})
+	err = s.host.OpPod(podFullName, podOp)
+	if err == dockertools.ErrNoContainersInPod {
+		http.Error(w, "api.BoundPod does not exist", http.StatusNotFound)
+		return
+	}
+	result := PodOpResult{Op: podOp, Code: 0, ErrorMsg: "success"}
+	if err != nil {
+		//s.error(w, err)
+		result.Code = -1
+		result.ErrorMsg = fmt.Sprintf("%v", err)
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		s.error(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	//w.Header().Add("Content-type", "text/plain")
+	w.Header().Add("Content-type", "application/json")
+	w.Write(data)
 }

@@ -48,6 +48,13 @@ type PodUpdate struct {
 	Op   PodOperation
 }
 
+// PodOpResult define start/stop container's result
+type PodOpResult struct {
+	Op       string `json:"op"`
+	Code     int    `json:"code"`
+	ErrorMsg string `json:"errorMsg"`
+}
+
 // GetPodFullName returns a name that uniquely identifies a pod across all config sources.
 func GetPodFullName(pod *api.BoundPod) string {
 	return fmt.Sprintf("%s.%s.%s", pod.Name, pod.Namespace, pod.Annotations[ConfigSourceAnnotationKey])
