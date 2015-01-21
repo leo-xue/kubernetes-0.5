@@ -17,6 +17,7 @@ limitations under the License.
 package kubelet
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"io"
@@ -526,6 +527,22 @@ func (kl *Kubelet) runContainer(pod *api.BoundPod, container *api.Container, pod
 			return dockertools.DockerID(""), fmt.Errorf("failed to call event handler: %v", handlerErr)
 		}
 	}
+
+	if strings.Contains(netMode, "container") {
+		// set disk quota
+		if err := kl.addDiskQuota(dockerContainer.ID, container.Name, container.Disk); err != nil {
+			glog.Errorf("Failed to set up disk quota %v", err)
+			return "", err
+		}
+		if container.Blkio != nil {
+			blkio := &BlkioGroup{}
+			if err := blkio.SetUp(dockerContainer.ID, container.Blkio); err != nil {
+				glog.Errorf("Failed to set up blkio %v", err)
+				return "", err
+			}
+		}
+	}
+
 	return dockertools.DockerID(dockerContainer.ID), err
 }
 
@@ -536,6 +553,16 @@ func (kl *Kubelet) killContainer(dockerContainer *docker.APIContainers) error {
 
 func (kl *Kubelet) killContainerByID(ID, name string) error {
 	glog.V(2).Infof("Killing: %s", ID)
+
+	// delete disk quota
+	_, _, containerName, _ := dockertools.ParseDockerName(name)
+	if containerName != "net" {
+		if err := kl.removeDiskQuota(ID, containerName); err != nil {
+			glog.Errorf("Failed to clean up disk quota %v", err)
+			return err
+		}
+	}
+
 	err := kl.dockerClient.StopContainer(ID, 10)
 	if len(name) == 0 {
 		return err
@@ -1236,6 +1263,17 @@ func (kl *Kubelet) opPodStartContainer(pod *api.BoundPod) error {
 
 	podFullName := GetPodFullName(pod)
 	uuid := pod.UID
+	var netID dockertools.DockerID
+
+	if netDockerContainer, found, _ := dockerContainers.FindPodContainer(podFullName, uuid, networkContainerName); found {
+		netID = dockertools.DockerID(netDockerContainer.ID)
+	} else {
+		glog.Errorf("Can't find network container by %s %s, error: %v", podFullName, uuid, err)
+		return err
+	}
+
+	glog.V(3).Infof("Network container ID is: %s", string(netID))
+
 	for _, container := range pod.Spec.Containers {
 		if _, found, _ := dockerContainers.FindPodContainer(podFullName, uuid, container.Name); found {
 			glog.V(3).Infof("Container %s.%s is running, skiped.", podFullName, container.Name)
@@ -1245,10 +1283,31 @@ func (kl *Kubelet) opPodStartContainer(pod *api.BoundPod) error {
 		deadContainers, err := dockertools.GetRecentDockerContainersWithNameAndUUID(kl.dockerClient, podFullName, uuid, container.Name)
 		sort.Sort(ByCreated(deadContainers))
 		latestContainer := deadContainers[0]
-		err = kl.dockerClient.StartContainer(latestContainer.ID, nil)
+
+		err = kl.dockerClient.StartContainer(latestContainer.ID, &docker.HostConfig{
+			PortBindings: latestContainer.HostConfig.PortBindings,
+			Binds:        latestContainer.HostConfig.Binds,
+			NetworkMode:  "container:" + string(netID),
+			Privileged:   latestContainer.HostConfig.Privileged,
+			CapAdd:       latestContainer.HostConfig.CapAdd,
+			CapDrop:      latestContainer.HostConfig.CapDrop,
+		})
 		if err != nil {
 			glog.Errorf("Start container %s.%s  %s error: %v", podFullName, container.Name, latestContainer.ID, err)
 			return err
+		}
+		// set disk quota
+		if err := kl.addDiskQuota(latestContainer.ID, container.Name, container.Disk); err != nil {
+			glog.Errorf("Failed to set up disk quota %v", err)
+			return err
+		}
+		// set blkio
+		if container.Blkio != nil {
+			blkio := &BlkioGroup{}
+			if err := blkio.SetUp(latestContainer.ID, container.Blkio); err != nil {
+				glog.Errorf("Failed to set up blkio %v", err)
+				return err
+			}
 		}
 	}
 	return nil
@@ -1304,3 +1363,120 @@ func (kl *Kubelet) OpPod(podFullName, op string) error {
 
 	return err
 }
+
+// addDiskQuota set up disk queta on pod
+func (kl *Kubelet) addDiskQuota(ID, name string, disk int) error {
+	// when disk <= 0 then skip addDiskQuota
+	if disk <= 0 {
+		glog.V(3).Infof("Container:%s disk set to %d, addDiskQuota ignore", name, disk)
+		return nil
+	}
+
+	data, err := kl.dockerClient.InspectContainer(ID)
+	if err != nil {
+		return err
+	}
+	pid := data.State.Pid
+
+	glog.V(3).Infof("Handle for addDiskQuota:Pid=>%d ID=>%s Name=>%s Disk=>%d", pid, ID, name, disk)
+
+	// set /etc/projects file
+	err = kl.refreshProjfile("/etc/projects", fmt.Sprintf("%d:%s%s", pid, "/data/docker-volumes/", name), name)
+	if err != nil {
+		return err
+	}
+	// set /etc/projid file
+	err = kl.refreshProjfile("/etc/projid", fmt.Sprintf("%s:%d", name, pid), name)
+	if err != nil {
+		return err
+	}
+
+	// xfs_quota
+	_, err = exec.Command("xfs_quota", "-x", "-c", fmt.Sprintf("project -s %s", name), "/data").CombinedOutput()
+	if err != nil {
+		return err
+	}
+
+	_, err = exec.Command("xfs_quota", "-x", "-c", fmt.Sprintf("limit -p bhard=%dg %s", disk, name), "/data").CombinedOutput()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// removeDiskQuota clean up disk queta on pod
+func (kl *Kubelet) removeDiskQuota(ID, name string) error {
+	data, err := kl.dockerClient.InspectContainer(ID)
+	if err != nil {
+		return err
+	}
+	pid := data.State.Pid
+
+	glog.V(3).Infof("Handle for removeDiskQuota:Pid=>%d ID=>%s Name=>%s", pid, ID, name)
+
+	cmd := exec.Command("xfs_quota", "-x", "-c", fmt.Sprintf("project -C %s", name), "/data")
+	stderr := bytes.NewBuffer(nil)
+	cmd.Stderr = stderr
+	if err = cmd.Run(); err != nil {
+		glog.V(3).Infof("Exec Command failed,stderr: %s", string(stderr.Bytes()))
+		if strings.Contains(string(stderr.Bytes()), "no such project") {
+			return nil
+		}
+		return err
+	}
+
+	// set /etc/projects file
+	err = kl.refreshProjfile("/etc/projects", "", name)
+	if err != nil {
+		return err
+	}
+	// set /etc/projid file
+	err = kl.refreshProjfile("/etc/projid", "", name)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (kl *Kubelet) refreshProjfile(fileName, data, filter string) error {
+	kl.refLock.Lock()
+	defer kl.refLock.Unlock()
+
+	var lines []string
+
+	rf, err := os.OpenFile(fileName, os.O_RDONLY|os.O_CREATE, 0600)
+	defer rf.Close()
+	if err != nil {
+		return err
+	}
+	buf := bufio.NewReader(rf)
+	for {
+		line, _ := buf.ReadString('\n')
+		line = strings.Trim(line, "\r\n")
+		if line == "" {
+			break
+		}
+		if !strings.Contains(line, filter) {
+			lines = append(lines, line)
+		}
+	}
+
+	if data != "" {
+		lines = append(lines, data)
+	}
+
+	wf, err := os.OpenFile(fileName, os.O_WRONLY|os.O_TRUNC|os.O_SYNC, 0600)
+	defer wf.Close()
+	if err != nil {
+		return err
+	}
+	_, err = wf.WriteString(strings.Join(lines, "\n"))
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+

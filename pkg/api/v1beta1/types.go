@@ -274,6 +274,17 @@ type Container struct {
 	CapAdd []string `json:"capAdd,omitempty" yaml:"capAdd,omitempty"`
 	// Optional: cap-drop
 	CapDrop []string `json:"capDrop,omitempty" yaml:"capDrop,omitempty"`
+	// (hbo)Blkio settings
+	Blkio *Blkio `yaml:"blkio,omitempty" json:"blkio,omitempty" description:"disk blkio"`
+}
+
+// Blkio struct
+type Blkio struct {
+	ReadBPSDevice   int `yaml:"readBPSDevice,omitempty" json:"readBPSDevice,omitempty"`
+	WriteBPSDevice  int `yaml:"writeBPSDevice,omitempty" json:"writeBPSDevice,omitempty"`
+	ReadIOPSDevice  int `yaml:"readIOPSDevice,omitempty" json:"readIOPSDevice,omitempty"`
+	WriteIOPSDevice int `yaml:"writeIOPSDevice,omitempty" json:"writeIOPSDevice,omitempty"`
+	WeightDevice    int `yaml:"weightDevice,omitempty" json:"weightDevice,omitempty"`
 }
 
 // Handler defines a specific action that should be taken
