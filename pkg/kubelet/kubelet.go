@@ -731,8 +731,10 @@ func (kl *Kubelet) syncPod(pod *api.BoundPod, dockerContainers dockertools.Docke
 			containerID := dockertools.DockerID(dockerContainer.ID)
 			glog.V(3).Infof("pod %s container %s exists as %v", podFullName, container.Name, containerID)
 
+			ret := kl.compare(container, dockerContainer)
 			// look for changes in the container.
-			if hash == 0 || hash == expectedHash {
+			//if hash == 0 || hash == expectedHash {
+			if ret == 0 {
 				// TODO: This should probably be separated out into a separate goroutine.
 				healthy, err := kl.healthy(podFullName, uuid, podState, container, dockerContainer)
 				if err != nil {
@@ -745,6 +747,10 @@ func (kl *Kubelet) syncPod(pod *api.BoundPod, dockerContainers dockertools.Docke
 					continue
 				}
 				glog.V(1).Infof("pod %s container %s is unhealthy.", podFullName, container.Name, healthy)
+			} else if ret == 1 {
+				// TODO
+				glog.V(3).Info("do nothing")
+				continue
 			} else {
 				// Upgrade
 				containerChanged = true
@@ -1419,8 +1425,9 @@ func (kl *Kubelet) removeDiskQuota(ID, name string) error {
 	stderr := bytes.NewBuffer(nil)
 	cmd.Stderr = stderr
 	if err = cmd.Run(); err != nil {
-		glog.V(3).Infof("Exec Command failed,stderr: %s", string(stderr.Bytes()))
-		if strings.Contains(string(stderr.Bytes()), "no such project") {
+		errStr := string(stderr.Bytes())
+		glog.V(3).Infof("Exec Command failed,stderr: %s", errStr)
+		if strings.Contains(errStr, "doesn't exist") || strings.Contains(errStr, "no such project") {
 			return nil
 		}
 		return err
@@ -1478,5 +1485,16 @@ func (kl *Kubelet) refreshProjfile(fileName, data, filter string) error {
 	}
 
 	return nil
+}
+
+// The comparison of container, to determine whether to auto restart container
+func (kl *Kubelet) compare(container api.Container, dockerContainer *docker.APIContainers) int {
+	if container.Image != dockerContainer.Image {
+		glog.V(3).Infof("Image hash changed %s vs %s.", container.Image, dockerContainer.Image)
+		return 2
+	}
+	// TODO(hbo)
+	// compare disk\io\cpu\memory
+	return 0
 }
 
