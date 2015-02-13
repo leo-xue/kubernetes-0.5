@@ -18,7 +18,6 @@ package kubelet
 
 import (
 	"fmt"
-
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api"
 )
 
@@ -53,6 +52,28 @@ type PodOpResult struct {
 	Op       string `json:"op"`
 	Code     int    `json:"code"`
 	ErrorMsg string `json:"errorMsg"`
+}
+
+// PopUpgrade define upgrade container result
+// TODO (hbo)
+type PodUpgradeResult struct {
+	Code     int    `json:"code"`
+	ErrorMsg string `json:"errorMsg"`
+}
+
+// PushImageResult define push image result
+type ImageOpResult struct {
+	Op       string `json:"op"`
+	Code     int    `json:"code"`
+	ErrorMsg string `json:"errorMsg"`
+}
+
+// PushImageParams define push image to local hub
+type PushImageParams struct {
+	PodID        string `json:"podID"`
+	PodNamespace string `json:"podNamespace"`
+	Image        string `json:"image"`
+	Author       string `json:"author"`
 }
 
 // GetPodFullName returns a name that uniquely identifies a pod across all config sources.

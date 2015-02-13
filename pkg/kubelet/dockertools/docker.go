@@ -44,8 +44,10 @@ type DockerInterface interface {
 	StartContainer(id string, hostConfig *docker.HostConfig) error
 	StopContainer(id string, timeout uint) error
 	RemoveContainer(opts docker.RemoveContainerOptions) error
+	CommitContainer(opts docker.CommitContainerOptions) (*docker.Image, error)
 	InspectImage(image string) (*docker.Image, error)
 	PullImage(opts docker.PullImageOptions, auth docker.AuthConfiguration) error
+	PushImage(opts docker.PushImageOptions, auth docker.AuthConfiguration) error
 	Logs(opts docker.LogsOptions) error
 	Version() (*docker.Env, error)
 	CreateExec(docker.CreateExecOptions) (*docker.Exec, error)
@@ -595,6 +597,19 @@ func parseImageName(image string) (string, string) {
 		image = fmt.Sprintf("%s/%s", repo, image)
 	}
 	return image, tag
+}
+
+func ParseImageName(image string) (string, string, string) {
+	var (
+		regi string
+		tag  string
+	)
+	image, tag = parseImageName(image)
+	parts := strings.SplitN(image, "/", 2)
+	if len(parts) == 2 {
+		regi = parts[0]
+	}
+	return regi, image, tag
 }
 
 type ContainerCommandRunner interface {

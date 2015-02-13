@@ -35,6 +35,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/validation"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/capabilities"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/client/record"
+	"github.com/GoogleCloudPlatform/kubernetes/pkg/credentialprovider"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/health"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/kubelet/dockertools"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/tools"
@@ -85,6 +86,7 @@ func NewMainKubelet(
 		pullBurst:             pullBurst,
 		minimumGCAge:          minimumGCAge,
 		maxContainerCount:     maxContainerCount,
+		keyring:               credentialprovider.NewDockerKeyring(),
 	}
 }
 
@@ -146,6 +148,7 @@ type Kubelet struct {
 	// Optional, minimum age required for garbage collection.  If zero, no limit.
 	minimumGCAge      time.Duration
 	maxContainerCount int
+	keyring           credentialprovider.DockerKeyring
 }
 
 type ByCreated []*docker.Container
@@ -446,6 +449,15 @@ func (kl *Kubelet) runContainer(pod *api.BoundPod, container *api.Container, pod
 	ref, err := containerRef(pod, container)
 	if err != nil {
 		glog.Errorf("Couldn't make a ref to pod %v, container %v: '%v'", pod.Name, container.Name, err)
+	}
+
+	// start lxcf
+	// HBO
+	if container.Name != "net" {
+		if err = kl.OpLxcfs(container.Name, "start"); err != nil {
+			glog.Errorf("Failed to start lxcfs for %s: %v", container.Name, err)
+			return "", err
+		}
 	}
 
 	envVariables := makeEnvironmentVariables(container)
@@ -944,6 +956,14 @@ func (kl *Kubelet) SyncPods(pods []api.BoundPod) error {
 			if err != nil {
 				glog.Errorf("Error killing container %+v: %v", pc, err)
 			}
+			if containerName != "net" {
+				// stop lxcf
+				// kill net container is means that the minion(host) is restarted
+				// or terminate pod
+				if err := kl.OpLxcfs(containerName, "stop"); err != nil {
+					glog.Errorf("Failed to stop lxcfs for %s: %v", containerName, err)
+				}
+			}
 		}
 	}
 
@@ -1370,6 +1390,103 @@ func (kl *Kubelet) OpPod(podFullName, op string) error {
 	return err
 }
 
+// PushImage push image to local hub
+func (kl *Kubelet) PushImage(params *PushImageParams) error {
+	var (
+		pod         *api.BoundPod
+		containerID string
+		err         error
+	)
+	// check image if exists
+	_, err = kl.dockerClient.InspectImage(params.Image)
+	if err == nil {
+		return fmt.Errorf("Image: %s already exists, can't push again", params.Image)
+	}
+	if err.Error() != "no such image" {
+		return fmt.Errorf("Failed to inspect image: %s", params.Image)
+	}
+
+	// get container id
+	dockerContainers, err := dockertools.GetKubeletDockerContainers(kl.dockerClient, false)
+	if err != nil {
+		glog.Errorf("Error listing containers: %#v", dockerContainers)
+		return err
+	}
+	podFullName := GetPodFullName(&api.BoundPod{
+		ObjectMeta: api.ObjectMeta{
+			Name:        params.PodID,
+			Namespace:   params.PodNamespace,
+			Annotations: map[string]string{ConfigSourceAnnotationKey: "etcd"},
+		},
+	})
+	for i, size := 0, len(kl.pods); i < size; i++ {
+		p := &kl.pods[i]
+		if GetPodFullName(p) == podFullName {
+			pod = p
+			break
+		}
+	}
+	for _, container := range pod.Spec.Containers {
+		if dockerContainer, found, _ := dockerContainers.FindPodContainer(podFullName, pod.UID, container.Name); found {
+			containerID = dockerContainer.ID
+			break
+		}
+		commitContainers, err := dockertools.GetRecentDockerContainersWithNameAndUUID(kl.dockerClient, podFullName, pod.UID, container.Name)
+		if err != nil {
+			glog.Errorf("Error listing recent containers with name and uuid:%s--%s--%s", podFullName, pod.UID, container.Name)
+			return err
+		}
+		if len(commitContainers) > 0 {
+			containerID = commitContainers[0].ID
+			break
+		} else {
+			err = fmt.Errorf("Container with name %s--%s--%s doesn't exist, creating %#v", podFullName, pod.UID, container.Name, container)
+			glog.Error(err)
+			return err
+		}
+	}
+
+	glog.V(3).Infof("Commit containerID: %s", containerID)
+	// data.image e.g. hub.oa.com/library/tlinux1.2:latest
+	// after parse,result is:
+	// regi:	hub.oa.com
+	// repo:	hub.oa.com/library/tlinux1.2
+	// tag:		latest
+	regi, repo, tag := dockertools.ParseImageName(params.Image)
+
+	// commit container
+	containerOpts := docker.CommitContainerOptions{
+		Container:  containerID,
+		Repository: repo,
+		Tag:        tag,
+		Author:     params.Author,
+		Message:    "push custom image",
+	}
+	_, err = kl.dockerClient.CommitContainer(containerOpts)
+	if err != nil {
+		glog.Errorf("Failed to commit container: %s, error: %v", containerID, err)
+		return err
+	}
+
+	// push image
+	imageOpts := docker.PushImageOptions{
+		Name:     repo,
+		Tag:      tag,
+		Registry: regi,
+	}
+	creds, ok := kl.keyring.Lookup(repo)
+	if !ok {
+		glog.V(1).Infof("Push image: %s without credentials", repo)
+	}
+	err = kl.dockerClient.PushImage(imageOpts, creds)
+	if err != nil {
+		glog.Errorf("Failed to push image: %s, error: %v", repo, err)
+		return err
+	}
+
+	return nil
+}
+
 // addDiskQuota set up disk queta on pod
 func (kl *Kubelet) addDiskQuota(ID, name string, disk int) error {
 	// when disk <= 0 then skip addDiskQuota
@@ -1484,6 +1601,26 @@ func (kl *Kubelet) refreshProjfile(fileName, data, filter string) error {
 		return err
 	}
 
+	return nil
+}
+
+// OpLxcfs stop/start lxcfs on minion
+func (kl *Kubelet) OpLxcfs(podId, op string) error {
+	var (
+		out []byte
+		err error
+	)
+	if op == "start" {
+		out, err = exec.Command("/usr/local/lxcfs/start_lxcfs.sh", podId).CombinedOutput()
+	} else if op == "stop" {
+		out, err = exec.Command("/usr/local/lxcfs/stop_lxcfs.sh", podId).CombinedOutput()
+	} else {
+		return fmt.Errorf("Op (%s) type error", op)
+	}
+	glog.V(3).Infof("OpLxcfs (%s) result %s", podId, string(out))
+	if err != nil && err.Error() != "exit status 1" {
+		return err
+	}
 	return nil
 }
 

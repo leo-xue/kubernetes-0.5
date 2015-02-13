@@ -73,6 +73,7 @@ type HostInterface interface {
 	GetKubeletContainerLogs(podFullName, containerName, tail string, follow bool, stdout, stderr io.Writer) error
 	ServeLogs(w http.ResponseWriter, req *http.Request)
 	OpPod(podFullName, podOp string) error
+	PushImage(params *PushImageParams) error
 }
 
 // NewServer initializes and configures a kubelet.Server object to handle HTTP requests.
@@ -97,6 +98,7 @@ func (s *Server) InstallDefaultHandlers() {
 	s.mux.HandleFunc("/stats/", s.handleStats)
 	s.mux.HandleFunc("/spec/", s.handleSpec)
 	s.mux.HandleFunc("/podOp", s.handlePodOp)
+	s.mux.HandleFunc("/image/", s.handleImage)
 }
 
 // InstallDeguggingHandlers registers the HTTP request patterns that serve logs or run commands/containers
@@ -479,6 +481,64 @@ func (s *Server) handlePodOp(w http.ResponseWriter, req *http.Request) {
 		result.Code = -1
 		result.ErrorMsg = fmt.Sprintf("%v", err)
 	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		s.error(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	//w.Header().Add("Content-type", "text/plain")
+	w.Header().Add("Content-type", "application/json")
+	w.Write(data)
+}
+
+// handleImage handles image operation(push\rm) requests against the Kubelet
+func (s *Server) handleImage(w http.ResponseWriter, req *http.Request) {
+	parts := strings.Split(path.Clean(req.URL.Path), "/")
+	if len(parts) < 3 {
+		s.error(w, fmt.Errorf("request url error: %s", req.URL.Path))
+		return
+	}
+	method := parts[2]
+	body, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		s.error(w, err)
+		return
+	}
+
+	result := ImageOpResult{Op: method, Code: 0, ErrorMsg: "success"}
+
+	switch method {
+	case "push":
+		var params PushImageParams
+		if err = json.Unmarshal(body, &params); err != nil {
+			s.error(w, err)
+			return
+		}
+		if len(params.PodID) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			http.Error(w, "Missing 'podID' post entry.", http.StatusBadRequest)
+			return
+		}
+		if len(params.PodNamespace) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			http.Error(w, "Missing 'podNamespace=' post entry.", http.StatusBadRequest)
+			return
+		}
+		if len(params.Image) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			http.Error(w, "Missing 'image' post entry.", http.StatusBadRequest)
+			return
+		}
+		if err = s.host.PushImage(&params); err != nil {
+			result.Code = 1
+			result.ErrorMsg = fmt.Sprintf("%v", err)
+		}
+	default:
+		s.error(w, fmt.Errorf("unknown method %s", method))
+		return
+	}
+
 	data, err := json.Marshal(result)
 	if err != nil {
 		s.error(w, err)

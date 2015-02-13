@@ -68,14 +68,14 @@ func (factory *ConfigFactory) Create() *scheduler.Config {
 
 	algo := algorithm.NewGenericScheduler(
 		[]algorithm.FitPredicate{
+			// Fit is determined by node selector query
+			algorithm.NewSelectorMatchPredicate(minionLister),
 			// Fit is defined based on the absence of port conflicts.
 			algorithm.PodFitsPorts,
 			// Fit is determined by resource availability
 			algorithm.NewResourceFitPredicate(minionLister),
 			// Fit is determined by non-conflicting disk volumes
 			algorithm.NoDiskConflict,
-			// Fit is determined by node selector query
-			algorithm.NewSelectorMatchPredicate(minionLister),
 		},
 		// Prioritize nodes by least requested utilization.
 		algorithm.LeastRequestedPriority,

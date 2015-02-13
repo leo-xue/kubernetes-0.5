@@ -24,6 +24,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/labels"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/resources"
 	"github.com/golang/glog"
+	"strings"
 )
 
 type NodeInfo interface {
@@ -173,12 +174,29 @@ func (n *NodeSelector) PodSelectorMatches(pod api.Pod, existingPods []api.Pod, n
 	if len(pod.Spec.NodeSelector) == 0 {
 		return true, nil
 	}
+	// check whitelist
+	if whitelist, exists := pod.Spec.NodeSelector["whitelist"]; exists {
+		for _, hostIP := range strings.Split(whitelist, ",") {
+			if hostIP == node {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+
 	selector := labels.SelectorFromSet(pod.Spec.NodeSelector)
 	minion, err := n.info.GetNodeInfo(node)
 	if err != nil {
 		return false, err
 	}
-	return selector.Matches(labels.Set(minion.Labels)), nil
+	// check blacklist and model
+	active := true
+	if val, exists := minion.Labels["active"]; exists {
+		if val == "false" {
+			active = false
+		}
+	}
+	return selector.Matches(labels.Set(minion.Labels)) && active, nil
 }
 
 func PodFitsPorts(pod api.Pod, existingPods []api.Pod, node string) (bool, error) {
