@@ -37,6 +37,8 @@ type FakeDockerClient struct {
 	pulled        []string
 	Created       []string
 	Removed       []string
+	Commit        []string
+	Push          []string
 	VersionInfo   docker.Env
 }
 
@@ -139,6 +141,22 @@ func (f *FakeDockerClient) RemoveContainer(opts docker.RemoveContainerOptions) e
 	defer f.Unlock()
 	f.called = append(f.called, "remove")
 	f.Removed = append(f.Removed, opts.ID)
+	return f.Err
+}
+
+func (f *FakeDockerClient) CommitContainer(opts docker.CommitContainerOptions) (*docker.Image, error) {
+	f.Lock()
+	defer f.Unlock()
+	f.called = append(f.called, "commit")
+	f.Removed = append(f.Commit, opts.Container)
+	return &docker.Image{}, f.Err
+}
+
+func (f *FakeDockerClient) PushImage(opts docker.PushImageOptions, auth docker.AuthConfiguration) error {
+	f.Lock()
+	defer f.Unlock()
+	f.called = append(f.called, "commit")
+	f.Removed = append(f.Push, fmt.Sprintf("%s/%s:%s", opts.Registry, opts.Name, opts.Tag))
 	return f.Err
 }
 
