@@ -1447,7 +1447,7 @@ func (kl *Kubelet) PushImage(params *PushImageParams) error {
 	}
 
 	glog.V(3).Infof("Commit containerID: %s", containerID)
-	// data.image e.g. hub.oa.com/library/tlinux1.2:latest
+	// data.image e.g. hub.oa.com/library/tlinux1.2:latest 
 	// after parse,result is:
 	// regi:	hub.oa.com
 	// repo:	hub.oa.com/library/tlinux1.2
@@ -1634,4 +1634,3 @@ func (kl *Kubelet) compare(container api.Container, dockerContainer *docker.APIC
 	// compare disk\io\cpu\memory
 	return 0
 }
-
