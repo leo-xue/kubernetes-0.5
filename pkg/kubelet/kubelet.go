@@ -194,7 +194,12 @@ func (kl *Kubelet) GarbageCollectContainers() error {
 	}
 	uuidToIDMap := map[string][]string{}
 	for _, container := range containers {
-		_, uuid, name, _ := dockertools.ParseDockerName(container.ID)
+		_, uuid, name, _ := dockertools.ParseDockerName(container.Names[0])
+		// only collect net container
+		// modify by hbo
+		if name != "net" {
+			continue
+		}
 		uuidName := uuid + "." + name
 		uuidToIDMap[uuidName] = append(uuidToIDMap[uuidName], container.ID)
 	}
