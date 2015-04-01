@@ -264,6 +264,7 @@ func (g *genericScheduler) numaCpuSelect(pod api.Pod, podLister PodLister, nodes
 func allocNetwork(pod api.Pod, podLister PodLister, node api.Minion) (api.Network, error) {
 	var (
 		network api.Network
+		used    bool
 	)
 
 	// host, nat, none
@@ -280,9 +281,17 @@ func allocNetwork(pod api.Pod, podLister PodLister, node api.Minion) (api.Networ
 	vms := node.Spec.VMs
 	pods := machineToPods[node.Name]
 	for i, vm := range vms {
-		used := false
+		used = false
 		for _, pod := range pods {
 			if vm.Address == pod.Status.Network.Address {
+				used = true
+			}
+		}
+		// Migrate container
+		// When nodeSelector.vmip is not null, need to check vmip if be equal minion.vms.address
+		if ip, exists := pod.Spec.NodeSelector["vmip"]; exists && !used {
+			parts := strings.Split(vm.Address, "/")
+			if len(parts) < 2 || parts[0] != ip {
 				used = true
 			}
 		}
@@ -294,6 +303,10 @@ func allocNetwork(pod api.Pod, podLister PodLister, node api.Minion) (api.Networ
 			network.Mode = pod.Spec.NetworkMode
 			break
 		}
+	}
+	// Network must be allocated
+	if used {
+		return api.Network{}, fmt.Errorf("Can't find valid vms on minion(%s)", node.Name)
 	}
 	return network, nil
 }
