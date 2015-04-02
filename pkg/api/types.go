@@ -497,6 +497,9 @@ type PodStatus struct {
 	Network Network `json:"network,omitempty" yaml:"network,omitempty"`
 	// CPU set("1,3")
 	CpuSet string `json:"cpuSet,omitempty" yaml:"cpuSet,omitempty"`
+
+	// scheduling failed count
+	SchedulerFailureCount int `json:"schedulerFailureCount,omitempty" yaml:"schedulerFailureCount,omitempty"`
 }
 
 // Pod is a collection of containers, used as either input (create, update) or as output (list, get).

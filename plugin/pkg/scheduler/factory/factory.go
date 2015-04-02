@@ -90,6 +90,7 @@ func (factory *ConfigFactory) Create() *scheduler.Config {
 		MinionLister: minionLister,
 		Algorithm:    algo,
 		Binder:       &binder{factory.Client},
+		Status:       &status{factory.Client},
 		NextPod: func() *api.Pod {
 			pod := podQueue.Pop().(*api.Pod)
 			glog.V(2).Infof("About to try and schedule pod %v\n"+
@@ -132,7 +133,7 @@ func (lw *listWatch) Watch(resourceVersion string) (watch.Interface, error) {
 func (factory *ConfigFactory) createUnassignedPodLW() *listWatch {
 	return &listWatch{
 		client:        factory.Client,
-		fieldSelector: labels.Set{"DesiredState.Host": ""}.AsSelector(),
+		fieldSelector: labels.Set{"DesiredState.Host": "", "Status.Phase": "Pending"}.AsSelector(),
 		resource:      "pods",
 	}
 }
@@ -184,6 +185,8 @@ func (factory *ConfigFactory) makeDefaultErrorFunc(backoff *podBackoff, podQueue
 			defer util.HandleCrash()
 			podID := pod.Name
 			podNamespace := pod.Namespace
+			// stash maximum retry times of scheduling
+			schedulerFailureCount := pod.Status.SchedulerFailureCount
 			backoff.wait(podID)
 			// Get the pod again; it may have changed/been scheduled already.
 			pod = &api.Pod{}
@@ -192,6 +195,7 @@ func (factory *ConfigFactory) makeDefaultErrorFunc(backoff *podBackoff, podQueue
 				glog.Errorf("Error getting pod %v for retry: %v; abandoning", podID, err)
 				return
 			}
+			pod.Status.SchedulerFailureCount = schedulerFailureCount
 			if pod.Status.Host == "" {
 				podQueue.Add(pod.Name, pod)
 			}
@@ -274,6 +278,17 @@ func (b *binder) Bind(binding *api.Binding) error {
 	glog.V(2).Infof("Attempting to bind %v to %v", binding.PodID, binding.Host)
 	ctx := api.WithNamespace(api.NewContext(), binding.Namespace)
 	return b.Post().Namespace(api.Namespace(ctx)).Path("bindings").Body(binding).Do().Error()
+}
+
+type status struct {
+	*client.Client
+}
+
+// UpdatePodStatus PUT pod RPC
+func (s *status) UpdatePodStatus(pod *api.Pod) error {
+	glog.V(2).Infof("Attempting to update pod (%s) status to %s", pod.Name, pod.Status.Phase)
+	ctx := api.WithNamespace(api.NewContext(), pod.Namespace)
+	return s.Put().Namespace(api.Namespace(ctx)).Path("pods").Path(pod.Name).Body(pod).Do().Error()
 }
 
 type clock interface {

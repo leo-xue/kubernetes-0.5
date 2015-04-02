@@ -31,6 +31,11 @@ type Binder interface {
 	Bind(binding *api.Binding) error
 }
 
+// Status set pod status
+type Status interface {
+	UpdatePodStatus(pod *api.Pod) error
+}
+
 // Scheduler watches for new unscheduled pods. It attempts to find
 // minions that they fit on and writes bindings back to the api server.
 type Scheduler struct {
@@ -41,6 +46,7 @@ type Config struct {
 	MinionLister scheduler.MinionLister
 	Algorithm    scheduler.Scheduler
 	Binder       Binder
+	Status       Status
 
 	// NextPod should be a function that blocks until the next pod
 	// is available. We don't use a channel for this, because scheduling
@@ -51,6 +57,9 @@ type Config struct {
 	// Error is called if there is an error. It is passed the pod in
 	// question, and the error
 	Error func(*api.Pod, error)
+
+	// Maximum number of retries when scheduling failed
+	MaxRetryTimes int
 }
 
 // New returns a new scheduler.
@@ -71,9 +80,17 @@ func (s *Scheduler) scheduleOne() {
 	glog.V(3).Infof("Attempting to schedule: %v", pod)
 	dest, err := s.config.Algorithm.Schedule(*pod, s.config.MinionLister)
 	if err != nil {
-		glog.V(1).Infof("Failed to schedule: %v", pod)
-		record.Eventf(pod, string(api.PodPending), "failedScheduling", "Error scheduling: %v", err)
-		s.config.Error(pod, err)
+		glog.V(1).Infof("Failed to schedule pod (times:%d): %v, err:%v", pod.Status.SchedulerFailureCount, pod, err)
+		if pod.Status.SchedulerFailureCount < s.config.MaxRetryTimes {
+			s.config.Error(pod, err)
+		} else {
+			record.Eventf(pod, string(api.PodPending), "failedScheduling", "Error scheduling: %v", err)
+			pod.Status.Phase = api.PodFailed
+			if err := s.config.Status.UpdatePodStatus(pod); err != nil {
+				glog.V(1).Infof("Failed to update pod (%s): %v", pod.Name, err)
+			}
+		}
+		pod.Status.SchedulerFailureCount++
 		return
 	}
 	b := &api.Binding{

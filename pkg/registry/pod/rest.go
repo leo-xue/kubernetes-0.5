@@ -279,7 +279,10 @@ func getInstanceIPFromCloud(cloud cloudprovider.Interface, host string) string {
 
 func getPodStatus(pod *api.Pod, minions client.MinionInterface) (api.PodPhase, error) {
 	if pod.Status.Host == "" {
-		return api.PodPending, nil
+		// change return value from api.PodPending to pod.Status.Phase
+		// when pod host is empty, it's status may be pending or failed
+		// by hbo at 2015.4.1
+		return pod.Status.Phase, nil
 	}
 	if minions != nil {
 		res, err := minions.List()

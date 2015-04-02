@@ -161,6 +161,7 @@ func (r *Registry) CreatePod(ctx api.Context, pod *api.Pod) error {
 	// Set current status to "Waiting".
 	pod.Status.Phase = api.PodPending
 	pod.Status.Host = ""
+	pod.Status.SchedulerFailureCount = 0
 	key, err := makePodKey(ctx, pod.Name)
 	if err != nil {
 		return err

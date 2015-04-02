@@ -34,9 +34,10 @@ import (
 )
 
 var (
-	port         = flag.Int("port", ports.SchedulerPort, "The port that the scheduler's http service runs on")
-	address      = util.IP(net.ParseIP("127.0.0.1"))
-	clientConfig = &client.Config{}
+	port          = flag.Int("port", ports.SchedulerPort, "The port that the scheduler's http service runs on")
+	maxRetryTimes = flag.Int("maximum_retry_times_scheduling", 5, "Maximum number of retries when scheduling failed.  Default: 5.")
+	address       = util.IP(net.ParseIP("127.0.0.1"))
+	clientConfig  = &client.Config{}
 )
 
 func init() {
@@ -62,6 +63,7 @@ func main() {
 
 	configFactory := &factory.ConfigFactory{Client: kubeClient}
 	config := configFactory.Create()
+	config.MaxRetryTimes = *maxRetryTimes
 	s := scheduler.New(config)
 	s.Run()
 
