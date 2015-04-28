@@ -1504,9 +1504,9 @@ func (kl *Kubelet) addDiskQuota(ID, name string, disk int) error {
 	if err != nil {
 		return err
 	}
-	pid := data.State.Pid
+	pid := data.State.Pid % 0xFFFF
 
-	glog.V(3).Infof("Handle for addDiskQuota:Pid=>%d ID=>%s Name=>%s Disk=>%d", pid, ID, name, disk)
+	glog.V(3).Infof("Handle for addDiskQuota:Pid=>%d(c32:%d) ID=>%s Name=>%s Disk=>%d", data.State.Pid, pid, ID, name, disk)
 
 	// set /etc/projects file
 	err = kl.refreshProjfile("/etc/projects", fmt.Sprintf("%d:%s%s", pid, "/data/docker-volumes/", name), name)
@@ -1539,9 +1539,9 @@ func (kl *Kubelet) removeDiskQuota(ID, name string) error {
 	if err != nil {
 		return err
 	}
-	pid := data.State.Pid
+	pid := data.State.Pid % 0xFFFF
 
-	glog.V(3).Infof("Handle for removeDiskQuota:Pid=>%d ID=>%s Name=>%s", pid, ID, name)
+	glog.V(3).Infof("Handle for removeDiskQuota:Pid=>%d(c32:%d) ID=>%s Name=>%s", data.State.Pid, pid, ID, name)
 
 	cmd := exec.Command("xfs_quota", "-x", "-c", fmt.Sprintf("project -C %s", name), "/data")
 	stderr := bytes.NewBuffer(nil)

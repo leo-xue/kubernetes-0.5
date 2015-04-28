@@ -285,20 +285,13 @@ func getPodStatus(pod *api.Pod, minions client.MinionInterface) (api.PodPhase, e
 		return pod.Status.Phase, nil
 	}
 	if minions != nil {
-		res, err := minions.List()
+		_, err := minions.Get(pod.Status.Host)
 		if err != nil {
-			glog.Errorf("Error listing minions: %v", err)
-			return "", err
-		}
-		found := false
-		for _, minion := range res.Items {
-			if minion.Name == pod.Status.Host {
-				found = true
-				break
+			if errors.IsNotFound(err) {
+				return api.PodFailed, nil
 			}
-		}
-		if !found {
-			return api.PodFailed, nil
+			glog.Errorf("Error getting minion: %v/%s", err, pod.Status.Host)
+			return "", err
 		}
 	} else {
 		glog.Errorf("Unexpected missing minion interface, status may be in-accurate")
