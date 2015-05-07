@@ -1315,6 +1315,14 @@ func (kl *Kubelet) opPodStartContainer(pod *api.BoundPod) error {
 		sort.Sort(ByCreated(deadContainers))
 		latestContainer := deadContainers[0]
 
+		// start lxcf befor create container
+		if container.Name != networkContainerName {
+			if err = kl.OpLxcfs(container.Name, "start"); err != nil {
+				glog.Errorf("Failed to start lxcfs for %s: %v", container.Name, err)
+				return err
+			}
+		}
+
 		err = kl.dockerClient.StartContainer(latestContainer.ID, &docker.HostConfig{
 			PortBindings: latestContainer.HostConfig.PortBindings,
 			Binds:        latestContainer.HostConfig.Binds,
