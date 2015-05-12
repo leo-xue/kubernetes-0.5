@@ -303,20 +303,23 @@ func makeMinionRegistry(c *Config) minion.Registry {
 
 // init initializes master.
 func (m *Master) init(c *Config) {
-	podCache := NewPodCache(c.KubeletClient, m.podRegistry)
-	go util.Forever(func() { podCache.UpdateAllContainers() }, time.Second*30)
-
 	var userContexts = handlers.NewUserRequestContext()
 	var authenticator = c.Authenticator
+
+	ipCache := NewIPCache(c.Cloud, util.RealClock{}, 30*time.Second)
+	podCache := NewPodCache(
+		ipCache,
+		c.KubeletClient,
+		m.client.Minions(),
+		m.podRegistry,
+	)
+	go util.Forever(func() { podCache.UpdateAllContainers() }, time.Second*30)
 
 	// TODO: Factor out the core API registration
 	m.storage = map[string]apiserver.RESTStorage{
 		"pods": pod.NewREST(&pod.RESTConfig{
-			CloudProvider: c.Cloud,
-			PodCache:      podCache,
-			PodInfoGetter: c.KubeletClient,
-			Registry:      m.podRegistry,
-			Minions:       m.client.Minions(),
+			PodCache: podCache,
+			Registry: m.podRegistry,
 		}),
 		"replicationControllers": controller.NewREST(m.controllerRegistry, m.podRegistry),
 		"services":               service.NewREST(m.serviceRegistry, c.Cloud, m.minionRegistry, m.portalNet),

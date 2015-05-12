@@ -18,72 +18,37 @@ package pod
 
 import (
 	"fmt"
-	"sync"
-	"time"
 
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/errors"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/v1beta1"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/validation"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/apiserver"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/client"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/cloudprovider"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/labels"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/runtime"
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/watch"
-
-	"github.com/golang/glog"
 )
 
-type ipCacheEntry struct {
-	ip         string
-	lastUpdate time.Time
-}
-
-type ipCache map[string]ipCacheEntry
-
-type clock interface {
-	Now() time.Time
-}
-
-type realClock struct{}
-
-func (r realClock) Now() time.Time {
-	return time.Now()
+type PodStatusGetter interface {
+	GetPodStatus(namespace, name string) (*api.PodStatus, error)
 }
 
 // REST implements the RESTStorage interface in terms of a PodRegistry.
 type REST struct {
-	cloudProvider cloudprovider.Interface
-	mu            sync.Mutex
-	podCache      client.PodInfoGetter
-	podInfoGetter client.PodInfoGetter
-	podPollPeriod time.Duration
-	registry      Registry
-	minions       client.MinionInterface
-	ipCache       ipCache
-	clock         clock
+	podCache PodStatusGetter
+	registry Registry
 }
 
 type RESTConfig struct {
-	CloudProvider cloudprovider.Interface
-	PodCache      client.PodInfoGetter
-	PodInfoGetter client.PodInfoGetter
-	Registry      Registry
-	Minions       client.MinionInterface
+	PodCache PodStatusGetter
+	Registry Registry
 }
 
 // NewREST returns a new REST.
 func NewREST(config *RESTConfig) *REST {
 	return &REST{
-		cloudProvider: config.CloudProvider,
-		podCache:      config.PodCache,
-		podInfoGetter: config.PodInfoGetter,
-		podPollPeriod: time.Second * 10,
-		registry:      config.Registry,
-		minions:       config.Minions,
-		ipCache:       ipCache{},
-		clock:         realClock{},
+		podCache: config.PodCache,
+		registry: config.Registry,
 	}
 }
 
@@ -126,17 +91,19 @@ func (rs *REST) Get(ctx api.Context, id string) (runtime.Object, error) {
 	if pod == nil {
 		return pod, nil
 	}
-	if rs.podCache != nil || rs.podInfoGetter != nil {
-		rs.fillPodInfo(pod)
-		status, err := getPodStatus(pod, rs.minions)
-		if err != nil {
-			return pod, err
+	host := pod.Status.Host
+	if status, err := rs.podCache.GetPodStatus(pod.Namespace, pod.Name); err != nil {
+		pod.Status = api.PodStatus{
+			// TODO (hbo)
+			// Status PodUnknown is not defined, change it to PodPending 
+			Phase: api.PodPending,
 		}
-		pod.Status.Phase = status
+	} else {
+		pod.Status = *status
 	}
-	if pod.Status.Host != "" {
-		pod.Status.HostIP = rs.getInstanceIP(pod.Status.Host)
-	}
+	// Make sure not to hide a recent host with an old one from the cache.
+	// TODO: move host to spec
+	pod.Status.Host = host
 	return pod, err
 }
 
@@ -171,15 +138,20 @@ func (rs *REST) List(ctx api.Context, label, field labels.Selector) (runtime.Obj
 	if err == nil {
 		for i := range pods.Items {
 			pod := &pods.Items[i]
-			rs.fillPodInfo(pod)
-			status, err := getPodStatus(pod, rs.minions)
-			if err != nil {
-				return pod, err
+			host := pod.Status.Host
+			if status, err := rs.podCache.GetPodStatus(pod.Namespace, pod.Name); err != nil {
+				pod.Status = api.PodStatus{
+					// TODO (hbo)
+					// Status PodUnknown is not defined, change it to PodPending 
+					Phase: api.PodPending,
+				}
+			} else {
+				pod.Status = *status
 			}
-			pod.Status.Phase = status
-			if pod.Status.Host != "" {
-				pod.Status.HostIP = rs.getInstanceIP(pod.Status.Host)
-			}
+			// Make sure not to hide a recent host with an old one from the cache.
+			// This is tested by the integration test.
+			// TODO: move host to spec
+			pod.Status.Host = host
 		}
 	}
 	return pods, err
@@ -208,121 +180,4 @@ func (rs *REST) Update(ctx api.Context, obj runtime.Object) (<-chan apiserver.RE
 		}
 		return rs.registry.GetPod(ctx, pod.Name)
 	}), nil
-}
-
-func (rs *REST) fillPodInfo(pod *api.Pod) {
-	if pod.Status.Host == "" {
-		return
-	}
-	// Get cached info for the list currently.
-	// TODO: Optionally use fresh info
-	if rs.podCache != nil {
-		info, err := rs.podCache.GetPodInfo(pod.Status.Host, pod.Namespace, pod.Name)
-		if err != nil {
-			if err != client.ErrPodInfoNotAvailable {
-				glog.Errorf("Error getting container info from cache: %v", err)
-			}
-			if rs.podInfoGetter != nil {
-				info, err = rs.podInfoGetter.GetPodInfo(pod.Status.Host, pod.Namespace, pod.Name)
-			}
-			if err != nil {
-				if err != client.ErrPodInfoNotAvailable {
-					glog.Errorf("Error getting fresh container info: %v", err)
-				}
-				return
-			}
-		}
-		pod.Status.Info = info
-		netContainerInfo, ok := info["net"]
-		if ok {
-			if netContainerInfo.PodIP != "" {
-				pod.Status.PodIP = netContainerInfo.PodIP
-			} else {
-				glog.Warningf("No network settings: %#v", netContainerInfo)
-			}
-		} else {
-			glog.Warningf("Couldn't find network container for %s in %v", pod.Name, info)
-		}
-	}
-}
-
-func (rs *REST) getInstanceIP(host string) string {
-	data, ok := rs.ipCache[host]
-	now := rs.clock.Now()
-
-	if !ok || now.Sub(data.lastUpdate) > (30*time.Second) {
-		ip := getInstanceIPFromCloud(rs.cloudProvider, host)
-		data = ipCacheEntry{
-			ip:         ip,
-			lastUpdate: now,
-		}
-		rs.ipCache[host] = data
-	}
-	return data.ip
-}
-
-func getInstanceIPFromCloud(cloud cloudprovider.Interface, host string) string {
-	if cloud == nil {
-		return ""
-	}
-	instances, ok := cloud.Instances()
-	if instances == nil || !ok {
-		return ""
-	}
-	addr, err := instances.IPAddress(host)
-	if err != nil {
-		glog.Errorf("Error getting instance IP for %q: %v", host, err)
-		return ""
-	}
-	return addr.String()
-}
-
-func getPodStatus(pod *api.Pod, minions client.MinionInterface) (api.PodPhase, error) {
-	if pod.Status.Host == "" {
-		// change return value from api.PodPending to pod.Status.Phase
-		// when pod host is empty, it's status may be pending or failed
-		// by hbo at 2015.4.1
-		return pod.Status.Phase, nil
-	}
-	if minions != nil {
-		_, err := minions.Get(pod.Status.Host)
-		if err != nil {
-			if errors.IsNotFound(err) {
-				return api.PodFailed, nil
-			}
-			glog.Errorf("Error getting minion: %v/%s", err, pod.Status.Host)
-			return "", err
-		}
-	} else {
-		glog.Errorf("Unexpected missing minion interface, status may be in-accurate")
-	}
-	if pod.Status.Info == nil {
-		return api.PodPending, nil
-	}
-	running := 0
-	stopped := 0
-	unknown := 0
-	for _, container := range pod.Spec.Containers {
-		if containerStatus, ok := pod.Status.Info[container.Name]; ok {
-			if containerStatus.State.Running != nil {
-				running++
-			} else if containerStatus.State.Termination != nil {
-				stopped++
-			} else {
-				unknown++
-			}
-		} else {
-			unknown++
-		}
-	}
-	switch {
-	case running > 0 && unknown == 0:
-		return api.PodRunning, nil
-	case running == 0 && stopped > 0 && unknown == 0:
-		return api.PodFailed, nil
-	case running == 0 && stopped == 0 && unknown > 0:
-		return api.PodPending, nil
-	default:
-		return api.PodPending, nil
-	}
 }
