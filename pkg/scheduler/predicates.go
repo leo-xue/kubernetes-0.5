@@ -213,6 +213,21 @@ func PodFitsPorts(pod api.Pod, existingPods []api.Pod, node string) (bool, error
 	return true, nil
 }
 
+func NoPodAffinity(pod api.Pod, existingPods []api.Pod, node string) (bool, error) {
+	if pod.Annotations == nil {
+		return true, nil
+	}
+	if jobid, exists := pod.Annotations["jobid"]; exists {
+		for _, scheduledPod := range existingPods {
+			if scheduledPod.Annotations["jobid"] == jobid{
+				glog.V(3).Infof("Affinity fit failed: jobid:%s, minions:%s", jobid, node)
+				return false, nil
+			}
+		}
+	}
+	return true, nil
+}
+
 func getUsedPorts(pods ...api.Pod) map[int]bool {
 	ports := make(map[int]bool)
 	for _, pod := range pods {

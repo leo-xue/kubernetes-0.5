@@ -70,6 +70,8 @@ func (factory *ConfigFactory) Create() *scheduler.Config {
 		[]algorithm.FitPredicate{
 			// Fit is determined by node selector query
 			algorithm.NewSelectorMatchPredicate(minionLister),
+			// Fit is defined based on the each pod is assigned to a different host
+			algorithm.NoPodAffinity,
 			// Fit is defined based on the absence of port conflicts.
 			algorithm.PodFitsPorts,
 			// Fit is determined by resource availability
