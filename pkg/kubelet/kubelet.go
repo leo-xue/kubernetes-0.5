@@ -197,7 +197,7 @@ func (kl *Kubelet) GarbageCollectContainers() error {
 		_, uuid, name, _ := dockertools.ParseDockerName(container.Names[0])
 		// only collect net container
 		// modify by hbo
-		if name != "net" {
+		if name != networkContainerName {
 			continue
 		}
 		uuidName := uuid + "." + name
@@ -456,9 +456,9 @@ func (kl *Kubelet) runContainer(pod *api.BoundPod, container *api.Container, pod
 		glog.Errorf("Couldn't make a ref to pod %v, container %v: '%v'", pod.Name, container.Name, err)
 	}
 
-	// start lxcf
-	// HBO
-	if container.Name != "net" {
+	// start lxcf befor create container
+	// hbo
+	if container.Name != networkContainerName {
 		if err = kl.OpLxcfs(container.Name, "start"); err != nil {
 			glog.Errorf("Failed to start lxcfs for %s: %v", container.Name, err)
 			return "", err
@@ -545,7 +545,7 @@ func (kl *Kubelet) runContainer(pod *api.BoundPod, container *api.Container, pod
 		}
 	}
 
-	if strings.Contains(netMode, "container") {
+	if container.Name != networkContainerName {
 		// set disk quota
 		if err := kl.addDiskQuota(dockerContainer.ID, container.Name, container.Disk); err != nil {
 			glog.Errorf("Failed to set up disk quota %v", err)
@@ -573,7 +573,7 @@ func (kl *Kubelet) killContainerByID(ID, name string) error {
 
 	// delete disk quota
 	_, _, containerName, _ := dockertools.ParseDockerName(name)
-	if containerName != "net" {
+	if containerName != networkContainerName {
 		if err := kl.removeDiskQuota(ID, containerName); err != nil {
 			glog.Errorf("Failed to clean up disk quota %v", err)
 			return err
@@ -692,34 +692,43 @@ func (kl *Kubelet) syncPod(pod *api.BoundPod, dockerContainers dockertools.Docke
 	if netDockerContainer, found, _ := dockerContainers.FindPodContainer(podFullName, uuid, networkContainerName); found {
 		netID = dockertools.DockerID(netDockerContainer.ID)
 	} else {
-		glog.V(3).Infof("Network container doesn't exist for pod %q, re-creating the pod", podFullName)
-		count, err := kl.killContainersInPod(pod, dockerContainers)
+		// check the network container whether has been created
+		// TODO(hbo)
+		netContainers, err := dockertools.GetRecentDockerContainersWithNameAndUUID(kl.dockerClient, podFullName, uuid, networkContainerName)
 		if err != nil {
+			glog.Errorf("Error listing net containers with name and uuid:%s--%s--%s", podFullName, uuid, networkContainerName)
 			return err
 		}
-		netID, err = kl.createNetworkContainer(pod)
-		if err != nil {
-			glog.Errorf("Failed to introspect network container: %v; Skipping pod %s", err, podFullName)
-			return err
-		}
-		if count > 0 {
-			// Re-list everything, otherwise we'll think we're ok.
-			dockerContainers, err = dockertools.GetKubeletDockerContainers(kl.dockerClient, false)
+		if len(netContainers) <= 0 {
+			glog.V(3).Infof("Network container doesn't exist for pod %q, re-creating the pod", podFullName)
+			count, err := kl.killContainersInPod(pod, dockerContainers)
 			if err != nil {
-				glog.Errorf("Error listing containers %#v", dockerContainers)
 				return err
 			}
-		}
+			netID, err = kl.createNetworkContainer(pod)
+			if err != nil {
+				glog.Errorf("Failed to introspect network container: %v; Skipping pod %s", err, podFullName)
+				return err
+			}
+			if count > 0 {
+				// Re-list everything, otherwise we'll think we're ok.
+				dockerContainers, err = dockertools.GetKubeletDockerContainers(kl.dockerClient, false)
+				if err != nil {
+					glog.Errorf("Error listing containers %#v", dockerContainers)
+					return err
+				}
+			}
 
-		if pod.Res.Network.Address != "" {
-			var errMsg string
-			errMsg, err = kl.setupNetwork(netID, pod)
-			if err != nil {
-				glog.Errorf("Failed to setup network for network container: %v; error msg: %s; Skipping pod %s", err, errMsg, podFullName)
-				return err
+			if pod.Res.Network.Address != "" {
+				var errMsg string
+				errMsg, err = kl.setupNetwork(netID, pod)
+				if err != nil {
+					glog.Errorf("Failed to setup network for network container: %v; error msg: %s; Skipping pod %s", err, errMsg, podFullName)
+					return err
+				}
+			} else {
+				glog.V(3).Infof("Skipping setup network for pod: %s", podFullName)
 			}
-		} else {
-			glog.V(3).Infof("Skipping setup network for pod: %s", podFullName)
 		}
 
 	}
@@ -961,10 +970,8 @@ func (kl *Kubelet) SyncPods(pods []api.BoundPod) error {
 			if err != nil {
 				glog.Errorf("Error killing container %+v: %v", pc, err)
 			}
-			if containerName != "net" {
-				// stop lxcf
-				// kill net container is means that the minion(host) is restarted
-				// or terminate pod
+			if containerName != networkContainerName {
+				// when destroy pod then stop lxcf here
 				if err := kl.OpLxcfs(containerName, "stop"); err != nil {
 					glog.Errorf("Failed to stop lxcfs for %s: %v", containerName, err)
 				}
@@ -1299,8 +1306,21 @@ func (kl *Kubelet) opPodStartContainer(pod *api.BoundPod) error {
 	if netDockerContainer, found, _ := dockerContainers.FindPodContainer(podFullName, uuid, networkContainerName); found {
 		netID = dockertools.DockerID(netDockerContainer.ID)
 	} else {
-		glog.Errorf("Can't find network container by %s %s, error: %v", podFullName, uuid, err)
-		return err
+		netID, err = kl.createNetworkContainer(pod)
+		if err != nil {
+			glog.Errorf("Failed to introspect network container: %v; Skipping pod %s", err, podFullName)
+			return err
+		}
+		if pod.Res.Network.Address != "" {
+			var errMsg string
+			errMsg, err = kl.setupNetwork(netID, pod)
+			if err != nil {
+				glog.Errorf("Failed to setup network for network container: %v; error msg: %s; Skipping pod %s", err, errMsg, podFullName)
+				return err
+			}
+		} else {
+			glog.V(3).Infof("Skipping setup network for pod: %s", podFullName)
+		}
 	}
 
 	glog.V(3).Infof("Network container ID is: %s", string(netID))
@@ -1358,14 +1378,22 @@ func (kl *Kubelet) opPodStopContainer(pod *api.BoundPod) error {
 		glog.Errorf("Error listing containers: %#v", dockerContainers)
 		return err
 	}
-
+	podFullName := GetPodFullName(pod)
+	uuid := pod.UID
 	count, err := kl.killContainersInPod(pod, dockerContainers)
 	if err != nil {
 		glog.Errorf("Error stop containers in pod: %s", pod.Name)
 		return err
 	}
-
 	glog.V(3).Infof("Stop %d containers in pod: %s", count, pod.Name)
+
+	if netContainer, found, _ := dockerContainers.FindPodContainer(podFullName, uuid, networkContainerName); found {
+		if err := kl.killContainer(netContainer); err != nil {
+			glog.V(1).Infof("Failed to stop network container %s: %v", podFullName, err)
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -1460,7 +1488,7 @@ func (kl *Kubelet) PushImage(params *PushImageParams) error {
 	}
 
 	glog.V(3).Infof("Commit containerID: %s", containerID)
-	// data.image e.g. hub.oa.com/library/tlinux1.2:latest 
+	// data.image e.g. hub.oa.com/library/tlinux1.2:latest
 	// after parse,result is:
 	// regi:	hub.oa.com
 	// repo:	hub.oa.com/library/tlinux1.2
@@ -1528,12 +1556,14 @@ func (kl *Kubelet) addDiskQuota(ID, name string, disk int) error {
 	}
 
 	// xfs_quota
-	_, err = exec.Command("xfs_quota", "-x", "-c", fmt.Sprintf("project -s %s", name), "/data").CombinedOutput()
+	out, err := exec.Command("xfs_quota", "-x", "-c", fmt.Sprintf("project -s %s", name), "/data").CombinedOutput()
+	glog.V(3).Infof("Exec Command %s out: %s", fmt.Sprintf("project -s %s", name), string(out))
 	if err != nil {
 		return err
 	}
 
-	_, err = exec.Command("xfs_quota", "-x", "-c", fmt.Sprintf("limit -p bhard=%dg %s", disk, name), "/data").CombinedOutput()
+	out, err = exec.Command("xfs_quota", "-x", "-c", fmt.Sprintf("limit -p bhard=%dg %s", disk, name), "/data").CombinedOutput()
+	glog.V(3).Infof("Exec Command %s out: %s", fmt.Sprintf("limit -p bhard=%dg %s", disk, name), string(out))
 	if err != nil {
 		return err
 	}
