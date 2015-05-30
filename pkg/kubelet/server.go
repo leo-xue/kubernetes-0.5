@@ -74,6 +74,7 @@ type HostInterface interface {
 	ServeLogs(w http.ResponseWriter, req *http.Request)
 	OpPod(podFullName, podOp string) error
 	PushImage(params *PushImageParams) error
+	UpdatePodCgroup(podFullName string, podConfig *PodConfig) error
 }
 
 // NewServer initializes and configures a kubelet.Server object to handle HTTP requests.
@@ -99,6 +100,7 @@ func (s *Server) InstallDefaultHandlers() {
 	s.mux.HandleFunc("/spec/", s.handleSpec)
 	s.mux.HandleFunc("/podOp", s.handlePodOp)
 	s.mux.HandleFunc("/image/", s.handleImage)
+	s.mux.HandleFunc("/podUpgrade/", s.handlePodUpgrade)
 }
 
 // InstallDeguggingHandlers registers the HTTP request patterns that serve logs or run commands/containers
@@ -531,6 +533,72 @@ func (s *Server) handleImage(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		if err = s.host.PushImage(&params); err != nil {
+			result.Code = 1
+			result.ErrorMsg = fmt.Sprintf("%v", err)
+		}
+	default:
+		s.error(w, fmt.Errorf("unknown method %s", method))
+		return
+	}
+
+	data, err := json.Marshal(result)
+	if err != nil {
+		s.error(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	//w.Header().Add("Content-type", "text/plain")
+	w.Header().Add("Content-type", "application/json")
+	w.Write(data)
+}
+
+// handlePodUpgrade handles pod upgrade;
+// e.g. up-or-down pod cgroup config; online update pod image
+func (s *Server) handlePodUpgrade(w http.ResponseWriter, req *http.Request) {
+	parts := strings.Split(path.Clean(req.URL.Path), "/")
+	if len(parts) < 3 {
+		s.error(w, fmt.Errorf("request url error: %s", req.URL.Path))
+		return
+	}
+	method := parts[2]
+	body, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		s.error(w, err)
+		return
+	}
+
+	result := PodOpResult{Op: method, Code: 0, ErrorMsg: "success"}
+
+	switch method {
+	case "cgroup":
+		var params PodConfig
+		if err = json.Unmarshal(body, &params); err != nil {
+			s.error(w, err)
+			return
+		}
+		if len(params.PodID) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			http.Error(w, "Missing 'podID' post entry.", http.StatusBadRequest)
+			return
+		}
+		if len(params.PodNamespace) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			http.Error(w, "Missing 'podNamespace' post entry.", http.StatusBadRequest)
+			return
+		}
+		if len(params.WriteSubsystem) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			http.Error(w, "Missing 'writeSubsystem' post entry.", http.StatusBadRequest)
+			return
+		}
+		podFullName := GetPodFullName(&api.BoundPod{
+			ObjectMeta: api.ObjectMeta{
+				Name:        params.PodID,
+				Namespace:   params.PodNamespace,
+				Annotations: map[string]string{ConfigSourceAnnotationKey: "etcd"},
+			},
+		})
+		if err = s.host.UpdatePodCgroup(podFullName, &params); err != nil {
 			result.Code = 1
 			result.ErrorMsg = fmt.Sprintf("%v", err)
 		}
