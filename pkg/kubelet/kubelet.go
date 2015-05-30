@@ -1667,6 +1667,50 @@ func (kl *Kubelet) OpLxcfs(podId, op string) error {
 	return nil
 }
 
+func (kl *Kubelet) UpdatePodCgroup(podFullName string, podConfig *PodConfig) error {
+	var (
+		err            error
+		pod            *api.BoundPod
+		writeSubsystem []docker.KeyValuePair
+	)
+
+	for i, size := 0, len(kl.pods); i < size; i++ {
+		p := &kl.pods[i]
+		if GetPodFullName(p) == podFullName {
+			pod = p
+			break
+		}
+	}
+	if pod == nil {
+		glog.Errorf("Can't find pod: %s", podFullName)
+		return dockertools.ErrNoContainersInPod
+	}
+	dockerContainers, err := dockertools.GetKubeletDockerContainers(kl.dockerClient, false)
+	if err != nil {
+		glog.Errorf("Error listing containers: %#v", dockerContainers)
+		return err
+	}
+
+	for _, entry := range podConfig.WriteSubsystem {
+		writeSubsystem = append(writeSubsystem, docker.KeyValuePair{Key: entry.Key, Value: entry.Value})
+	}
+
+	for _, container := range pod.Spec.Containers {
+		if dockerContainer, found, _ := dockerContainers.FindPodContainer(podFullName, pod.UID, container.Name); found {
+			glog.V(3).Infof("Update container(%s - %s) cgroup: %+v", container.Name, dockerContainer.ID, writeSubsystem)
+			err = kl.dockerClient.UpdateContainerCgroup(dockerContainer.ID, &docker.CgroupConfig{
+				WriteSubsystem: writeSubsystem,
+			})
+			if err != nil {
+				glog.Errorf("Update cgroup on container %s.%s  %s error: %v", podFullName, container.Name, dockerContainer.ID, err)
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 // The comparison of container, to determine whether to auto restart container
 func (kl *Kubelet) compare(container api.Container, dockerContainer *docker.APIContainers) int {
 	if container.Image != dockerContainer.Image {
