@@ -54,6 +54,13 @@ type PodOpResult struct {
 	ErrorMsg string `json:"errorMsg"`
 }
 
+// PopUpgrade define upgrade container result
+// TODO (hbo)
+type PodUpgradeResult struct {
+	Code     int    `json:"code"`
+	ErrorMsg string `json:"errorMsg"`
+}
+
 // PushImageResult define push image result
 type ImageOpResult struct {
 	Op       string `json:"op"`
@@ -67,18 +74,6 @@ type PushImageParams struct {
 	PodNamespace string `json:"podNamespace"`
 	Image        string `json:"image"`
 	Author       string `json:"author"`
-}
-
-type KVPair struct {
-	Key   string `json:"key,omitempty"`
-	Value string `json:"value,omitempty"`
-}
-
-// PodConfig define update container config
-type PodConfig struct {
-	PodID          string   `json:"podID"`
-	PodNamespace   string   `json:"podNamespace"`
-	WriteSubsystem []KVPair `json:"writeSubsystem"`
 }
 
 // GetPodFullName returns a name that uniquely identifies a pod across all config sources.

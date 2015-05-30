@@ -729,23 +729,3 @@ type ContainerNotRunning struct {
 func (err *ContainerNotRunning) Error() string {
 	return "Container not running: " + err.ID
 }
-
-// Update container cgroup, like cpuset.cpus\memory.limit_in_bytes
-type CgroupConfig struct {
-	WriteSubsystem []KeyValuePair `json:"WriteSubsystem,omitempty" yaml:"WriteSubsystem,omitempty"`
-}
-
-func (c *Client) UpdateContainerCgroup(id string, cgroupConfig *CgroupConfig) error {
-	if cgroupConfig == nil {
-		return fmt.Errorf("CgroupConfig is nil: %v", cgroupConfig)
-	}
-	path := "/containers/" + id + "/cgroup"
-	_, status, err := c.do("POST", path, cgroupConfig)
-	if status == http.StatusNotFound {
-		return &NoSuchContainer{ID: id}
-	}
-	if err != nil {
-		return err
-	}
-	return nil
-}
