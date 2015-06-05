@@ -409,6 +409,11 @@ func ValidatePodUpdate(newPod, oldPod *api.Pod) errs.ValidationErrorList {
 	var newContainers []api.Container
 	for ix, container := range pod.Spec.Containers {
 		container.Image = oldPod.Spec.Containers[ix].Image
+		// Online upgrade,want to ignore cpu\memory\disk validate,
+		// and scheduling can be perceived
+		container.Core = oldPod.Spec.Containers[ix].Core
+		container.Memory = oldPod.Spec.Containers[ix].Memory
+		container.Disk = oldPod.Spec.Containers[ix].Disk
 		newContainers = append(newContainers, container)
 	}
 	pod.Spec.Containers = newContainers
