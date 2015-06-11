@@ -739,7 +739,7 @@ func (c *Client) UpdateContainerCgroup(id string, cgroupConfig *CgroupConfig) er
 	if cgroupConfig == nil {
 		return fmt.Errorf("CgroupConfig is nil: %v", cgroupConfig)
 	}
-	path := "/containers/" + id + "/cgroup"
+	path := "/containers/" + id + "/cgroup?w=1"
 	_, status, err := c.do("POST", path, cgroupConfig)
 	if status == http.StatusNotFound {
 		return &NoSuchContainer{ID: id}
