@@ -301,6 +301,9 @@ func allocNetwork(pod api.Pod, podLister PodLister, node api.Minion) (api.Networ
 			network.Gateway = vms[i].Gateway
 			network.Bridge = fmt.Sprintf("br%d", vms[i].VlanID)
 			network.Mode = pod.Spec.NetworkMode
+			if vms[i].MacAddress != "" {
+				network.MacAddress = vms[i].MacAddress
+			}
 			break
 		}
 	}

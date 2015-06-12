@@ -825,4 +825,6 @@ type VM struct {
 	Gateway string `json:"gateway,omitempty" yaml:"gateway,omitempty"`
 	//VLAN ID
 	VlanID int `json:"vlanID,omitempty" yaml:"vlanID,omitempty"`
+	// MacAddress contains the MAC address to set on the network interface
+	MacAddress string `json:"macAddress,omitempty" yaml:"macAddress,omitempty"`
 }

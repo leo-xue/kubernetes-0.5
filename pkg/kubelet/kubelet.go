@@ -1140,7 +1140,7 @@ func (kl *Kubelet) setupNetwork(id dockertools.DockerID, pod *api.BoundPod) (str
 	//ex:"172.16.213.190/16@172.16.213.2"
 	ipAndGw := network.Address + "@" + network.Gateway
 
-	cmd := exec.Command("pipework", network.Bridge, string(id), ipAndGw)
+	cmd := exec.Command("pipework", network.Bridge, string(id), ipAndGw, network.MacAddress)
 	cmd.Dir = "/usr/local/bin"
 	cmd.Stderr = &out
 	glog.V(4).Infof("setup network: %#v", cmd.Args)
