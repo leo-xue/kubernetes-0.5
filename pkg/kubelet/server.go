@@ -18,7 +18,6 @@ package kubelet
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -75,6 +74,7 @@ type HostInterface interface {
 	OpPod(podFullName, podOp string) error
 	PushImage(params *PushImageParams) error
 	UpdatePodCgroup(podFullName string, podConfig *PodConfig) error
+	GetPodStats(podFullName string) (uint64, error)
 }
 
 // NewServer initializes and configures a kubelet.Server object to handle HTTP requests.
@@ -398,7 +398,29 @@ func (s *Server) serveStats(w http.ResponseWriter, req *http.Request) {
 	case 2:
 		// pod stats
 		// TODO(monnand) Implement this
-		errors.New("pod level status currently unimplemented")
+		// errors.New("pod level status currently unimplemented") ## delete by hbo
+		// Get Pod memory usage
+		podFullName := GetPodFullName(&api.BoundPod{
+			ObjectMeta: api.ObjectMeta{
+				Name: components[1],
+				// TODO: I am broken
+				Namespace:   api.NamespaceDefault,
+				Annotations: map[string]string{ConfigSourceAnnotationKey: "etcd"},
+			},
+		})
+		memUsage, err := s.host.GetPodStats(podFullName)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("get pod: %s stats error: %v", podFullName, err), http.StatusNotFound)
+			return
+		}
+		stats = new(info.ContainerInfo)
+		stats.Stats = make([]*info.ContainerStats, 1)
+		containerStats := new(info.ContainerStats)
+		containerStats.Timestamp = time.Now()
+		containerStats.Memory = new(info.MemoryStats)
+		containerStats.Memory.Usage = memUsage
+		stats.Stats[0] = containerStats
+		stats.ContainerReference.Name = podFullName
 	case 3:
 		// Backward compatibility without uuid information
 		podFullName := GetPodFullName(&api.BoundPod{
@@ -617,3 +639,4 @@ func (s *Server) handlePodUpgrade(w http.ResponseWriter, req *http.Request) {
 	w.Header().Add("Content-type", "application/json")
 	w.Write(data)
 }
+

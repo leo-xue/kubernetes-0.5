@@ -1711,6 +1711,47 @@ func (kl *Kubelet) UpdatePodCgroup(podFullName string, podConfig *PodConfig) err
 	return nil
 }
 
+// Get pod stats(only memory usage_in_bytes)
+// TODO(hbo)
+func (kl *Kubelet) GetPodStats(podFullName string) (uint64, error) {
+	var (
+		err        error
+		pod        *api.BoundPod
+		totalUsage uint64
+	)
+
+	for i, size := 0, len(kl.pods); i < size; i++ {
+		p := &kl.pods[i]
+		if GetPodFullName(p) == podFullName {
+			pod = p
+			break
+		}
+	}
+	if pod == nil {
+		glog.Errorf("Can't find pod: %s", podFullName)
+		return 0, dockertools.ErrNoContainersInPod
+	}
+	dockerContainers, err := dockertools.GetKubeletDockerContainers(kl.dockerClient, false)
+	if err != nil {
+		glog.Errorf("Error listing containers: %#v", dockerContainers)
+		return 0, err
+	}
+
+	totalUsage = 0
+	for _, container := range pod.Spec.Containers {
+		if dockerContainer, found, _ := dockerContainers.FindPodContainer(podFullName, pod.UID, container.Name); found {
+			usage, err := dockertools.GetDockerContainerStats(dockerContainer.ID)
+			if err != nil {
+				glog.Errorf("Get container %s cgroup stats error: %v", dockerContainer.ID, err)
+				return 0, err
+			}
+			totalUsage += usage
+		}
+	}
+
+	return totalUsage, nil
+}
+
 // The comparison of container, to determine whether to auto restart container
 func (kl *Kubelet) compare(container api.Container, dockerContainer *docker.APIContainers) int {
 	if container.Image != dockerContainer.Image {
@@ -1721,3 +1762,4 @@ func (kl *Kubelet) compare(container api.Container, dockerContainer *docker.APIC
 	// compare disk\io\cpu\memory
 	return 0
 }
+

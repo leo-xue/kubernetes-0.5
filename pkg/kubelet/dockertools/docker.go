@@ -34,6 +34,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/util"
 	docker "github.com/fsouza/go-dockerclient"
 	"github.com/golang/glog"
+	"path/filepath"
 )
 
 // DockerInterface is an abstract interface for testability.  It abstracts the interface of docker.Client.
@@ -616,3 +617,24 @@ func ParseImageName(image string) (string, string, string) {
 type ContainerCommandRunner interface {
 	RunInContainer(containerID string, cmd []string) ([]byte, error)
 }
+
+// Get docker container memory cgroup stats
+// Gets a single uint64 value from the specified cgroup file.
+func getCgroupParamUint(cgroupPath, cgroupFile string) (uint64, error) {
+	contents, err := ioutil.ReadFile(filepath.Join(cgroupPath, cgroupFile))
+	if err != nil {
+		return 0, err
+	}
+
+	return strconv.ParseUint(strings.TrimSpace(string(contents)), 10, 64)
+}
+
+func GetDockerContainerStats(containerID string) (uint64, error) {
+	cgroupMemoryDir := fmt.Sprintf("/cgroup/memory/docker/%s", containerID)
+	memoryUsage, err := getCgroupParamUint(cgroupMemoryDir, "memory.usage_in_bytes")
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse memory.usage_in_bytes - %v", err)
+	}
+	return memoryUsage, nil
+}
+
