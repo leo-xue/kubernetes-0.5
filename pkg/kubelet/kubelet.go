@@ -43,6 +43,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/volume"
 	"github.com/fsouza/go-dockerclient"
 	"github.com/golang/glog"
+	"github.com/google/cadvisor/info"
 )
 
 const defaultChanSize = 1024
@@ -1711,13 +1712,12 @@ func (kl *Kubelet) UpdatePodCgroup(podFullName string, podConfig *PodConfig) err
 	return nil
 }
 
-// Get pod stats(only memory usage_in_bytes)
+// Get pod memory stats
 // TODO(hbo)
-func (kl *Kubelet) GetPodStats(podFullName string) (uint64, error) {
+func (kl *Kubelet) GetPodStats(podFullName string, stats *info.ContainerStats) error {
 	var (
-		err        error
-		pod        *api.BoundPod
-		totalUsage uint64
+		err error
+		pod *api.BoundPod
 	)
 
 	for i, size := 0, len(kl.pods); i < size; i++ {
@@ -1729,27 +1729,25 @@ func (kl *Kubelet) GetPodStats(podFullName string) (uint64, error) {
 	}
 	if pod == nil {
 		glog.Errorf("Can't find pod: %s", podFullName)
-		return 0, dockertools.ErrNoContainersInPod
+		return dockertools.ErrNoContainersInPod
 	}
 	dockerContainers, err := dockertools.GetKubeletDockerContainers(kl.dockerClient, false)
 	if err != nil {
 		glog.Errorf("Error listing containers: %#v", dockerContainers)
-		return 0, err
+		return err
 	}
 
-	totalUsage = 0
 	for _, container := range pod.Spec.Containers {
 		if dockerContainer, found, _ := dockerContainers.FindPodContainer(podFullName, pod.UID, container.Name); found {
-			usage, err := dockertools.GetDockerContainerStats(dockerContainer.ID)
+			err := dockertools.GetDockerContainerStats(dockerContainer.ID, stats)
 			if err != nil {
 				glog.Errorf("Get container %s cgroup stats error: %v", dockerContainer.ID, err)
-				return 0, err
+				return err
 			}
-			totalUsage += usage
 		}
 	}
 
-	return totalUsage, nil
+	return nil
 }
 
 // The comparison of container, to determine whether to auto restart container

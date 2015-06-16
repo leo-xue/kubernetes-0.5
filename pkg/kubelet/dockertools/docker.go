@@ -25,6 +25,7 @@ import (
 	"io"
 	"io/ioutil"
 	"math/rand"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -34,6 +35,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/util"
 	docker "github.com/fsouza/go-dockerclient"
 	"github.com/golang/glog"
+	"github.com/google/cadvisor/info"
 	"path/filepath"
 )
 
@@ -619,22 +621,32 @@ type ContainerCommandRunner interface {
 }
 
 // Get docker container memory cgroup stats
-// Gets a single uint64 value from the specified cgroup file.
-func getCgroupParamUint(cgroupPath, cgroupFile string) (uint64, error) {
-	contents, err := ioutil.ReadFile(filepath.Join(cgroupPath, cgroupFile))
+func GetDockerContainerStats(containerID string, stats *info.ContainerStats) error {
+	path := fmt.Sprintf("/cgroup/memory/docker/%s", containerID)
+	statsFile, err := os.Open(filepath.Join(path, "memory.stat"))
 	if err != nil {
-		return 0, err
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer statsFile.Close()
+
+	sc := bufio.NewScanner(statsFile)
+	for sc.Scan() {
+		t, v, err := getCgroupParamKeyValue(sc.Text())
+		if err != nil {
+			return fmt.Errorf("failed to parse memory.stat (%q) - %v", sc.Text(), err)
+		}
+		stats.Memory.Stats[t] = v
 	}
 
-	return strconv.ParseUint(strings.TrimSpace(string(contents)), 10, 64)
-}
-
-func GetDockerContainerStats(containerID string) (uint64, error) {
-	cgroupMemoryDir := fmt.Sprintf("/cgroup/memory/docker/%s", containerID)
-	memoryUsage, err := getCgroupParamUint(cgroupMemoryDir, "memory.usage_in_bytes")
+	value, err := getCgroupParamUint(path, "memory.usage_in_bytes")
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse memory.usage_in_bytes - %v", err)
+		return fmt.Errorf("failed to parse memory.usage_in_bytes - %v", err)
 	}
-	return memoryUsage, nil
+	stats.Memory.Usage = value
+
+	return nil
 }
 

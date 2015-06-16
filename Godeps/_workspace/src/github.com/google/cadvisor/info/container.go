@@ -205,6 +205,9 @@ type MemoryStats struct {
 
 	ContainerData    MemoryStatsMemoryData `json:"container_data,omitempty"`
 	HierarchicalData MemoryStatsMemoryData `json:"hierarchical_data,omitempty"`
+
+	// all the stats exported via memory.stat.
+	Stats map[string]uint64 `json:"stats,omitempty"`
 }
 
 type MemoryStatsMemoryData struct {

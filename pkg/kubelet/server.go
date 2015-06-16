@@ -74,7 +74,7 @@ type HostInterface interface {
 	OpPod(podFullName, podOp string) error
 	PushImage(params *PushImageParams) error
 	UpdatePodCgroup(podFullName string, podConfig *PodConfig) error
-	GetPodStats(podFullName string) (uint64, error)
+	GetPodStats(podFullName string, stats *info.ContainerStats) error
 }
 
 // NewServer initializes and configures a kubelet.Server object to handle HTTP requests.
@@ -408,17 +408,17 @@ func (s *Server) serveStats(w http.ResponseWriter, req *http.Request) {
 				Annotations: map[string]string{ConfigSourceAnnotationKey: "etcd"},
 			},
 		})
-		memUsage, err := s.host.GetPodStats(podFullName)
-		if err != nil {
+		stats = new(info.ContainerInfo)
+		stats.Stats = make([]*info.ContainerStats, 1)
+		memoryStats := &info.MemoryStats{Stats: make(map[string]uint64)}
+		containerStats := &info.ContainerStats{
+			Timestamp: time.Now(),
+			Memory:    memoryStats,
+		}
+		if err = s.host.GetPodStats(podFullName, containerStats); err != nil {
 			http.Error(w, fmt.Sprintf("get pod: %s stats error: %v", podFullName, err), http.StatusNotFound)
 			return
 		}
-		stats = new(info.ContainerInfo)
-		stats.Stats = make([]*info.ContainerStats, 1)
-		containerStats := new(info.ContainerStats)
-		containerStats.Timestamp = time.Now()
-		containerStats.Memory = new(info.MemoryStats)
-		containerStats.Memory.Usage = memUsage
 		stats.Stats[0] = containerStats
 		stats.ContainerReference.Name = podFullName
 	case 3:
