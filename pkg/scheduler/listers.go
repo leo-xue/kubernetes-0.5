@@ -38,6 +38,7 @@ func (f FakeMinionLister) List() (api.MinionList, error) {
 type PodLister interface {
 	// TODO: make this exactly the same as client's ListPods() method...
 	ListPods(labels.Selector) ([]api.Pod, error)
+	GetPodInfo(string) (*api.Pod, error)
 }
 
 // FakePodLister implements PodLister on an []api.Pods for test purposes.

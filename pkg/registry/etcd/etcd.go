@@ -252,6 +252,7 @@ func (r *Registry) assignPod(ctx api.Context, binding *api.Binding) error {
 		}
 		return boundPodList, nil
 	})
+	glog.V(3).Infof("End to bound pod %+v", binding)
 	if err != nil {
 		// Put the pod's host back the way it was. This is a terrible hack, but
 		// can't really be helped, since there's not really a way to do atomic

@@ -24,6 +24,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/util"
 
 	"github.com/golang/glog"
+	"time"
 )
 
 // Binder knows how to write a binding.
@@ -106,5 +107,14 @@ func (s *Scheduler) scheduleOne() {
 		s.config.Error(pod, err)
 		return
 	}
+	// check pod has scheduled
+	for {
+		ok, err := s.config.Algorithm.CheckScheduledPod(pod.Name)
+		if err != nil || ok {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
 	record.Eventf(pod, string(api.PodPending), "scheduled", "Successfully assigned %v to %#v", pod.Name, dest)
 }
+

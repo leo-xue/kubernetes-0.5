@@ -253,6 +253,15 @@ func (s *storeToPodLister) ListPods(selector labels.Selector) (pods []api.Pod, e
 	return pods, nil
 }
 
+// GetPodInfo returns cached daa for the pod 'id'.
+// id is podID
+func (s *storeToPodLister) GetPodInfo(id string) (*api.Pod, error) {
+	if pod, ok := s.Get(id); ok {
+		return pod.(*api.Pod), nil
+	}
+	return nil, fmt.Errorf("pod '%v' is not in cache", id)
+}
+
 // minionEnumerator allows a cache.Poller to enumerate items in an api.PodList
 type minionEnumerator struct {
 	*api.MinionList
@@ -351,3 +360,4 @@ func (p *podBackoff) gc() {
 		}
 	}
 }
+

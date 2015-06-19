@@ -30,4 +30,7 @@ type SelectedMachine struct {
 // onto machines.
 type Scheduler interface {
 	Schedule(api.Pod, MinionLister) (selectedMachine SelectedMachine, err error)
+
+	// Check pod scheduling status
+	CheckScheduledPod(string) (bool, error)
 }

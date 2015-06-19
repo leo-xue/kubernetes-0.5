@@ -321,3 +321,20 @@ func getMinionListIds(nodes api.MinionList) []string {
 	}
 	return ids
 }
+
+func (g *genericScheduler) CheckScheduledPod(podID string) (bool, error) {
+	var (
+		pod *api.Pod
+		err error
+	)
+	pod, err = g.pods.GetPodInfo(podID)
+	if err != nil {
+		glog.Errorf("Get pod(%s) from cache error: %v", podID, err)
+		return false, err
+	}
+	glog.V(3).Infof("Check pod(%s) status: %s ## %s ## %+v", podID, pod.Status.Host, pod.Status.CpuSet, pod.Status.Network)
+	if pod.Status.Host != "" && pod.Status.CpuSet != "" && pod.Status.Network != (api.Network{}) {
+		return true, nil
+	}
+	return false, nil
+}
