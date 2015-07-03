@@ -109,8 +109,8 @@ func (s *Scheduler) scheduleOne() {
 	}
 	// check pod has scheduled
 	for {
-		ok, err := s.config.Algorithm.CheckScheduledPod(pod.Name)
-		if err != nil || ok {
+		ok, _ := s.config.Algorithm.CheckScheduledPod(pod.Name)
+		if ok {
 			break
 		}
 		time.Sleep(1 * time.Second)
