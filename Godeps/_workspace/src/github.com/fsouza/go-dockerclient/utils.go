@@ -1,4 +1,4 @@
-package dockertools
+package docker
 
 import (
 	"errors"
@@ -59,5 +59,14 @@ func getCgroupParamUint(cgroupPath, cgroupFile string) (uint64, error) {
 	}
 
 	return parseUint(strings.TrimSpace(string(contents)), 10, 64)
+}
+
+func getCgroupParamString(cgroupPath, cgroupFile string) (string, error) {
+	contents, err := ioutil.ReadFile(filepath.Join(cgroupPath, cgroupFile))
+	if err != nil {
+		return "", err
+	}
+
+	return strings.Replace(strings.Trim(string(contents), "\r\n"), "\n", "", -1), nil
 }
 

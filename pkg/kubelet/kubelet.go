@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/exec"
@@ -52,6 +53,10 @@ const defaultChanSize = 1024
 const minShares = 2
 const sharesPerCPU = 1024
 const milliCPUToCPU = 1000
+
+const defaultDevice = "eth1"
+const sriovMode = "sriov"
+const bridgeMode = "bridge"
 
 // SyncHandler is an interface implemented by Kubelet, for testability
 type SyncHandler interface {
@@ -88,6 +93,7 @@ func NewMainKubelet(
 		minimumGCAge:          minimumGCAge,
 		maxContainerCount:     maxContainerCount,
 		keyring:               credentialprovider.NewDockerKeyring(),
+		podDestroyed:          map[string]*api.BoundPod{},
 	}
 }
 
@@ -150,6 +156,8 @@ type Kubelet struct {
 	minimumGCAge      time.Duration
 	maxContainerCount int
 	keyring           credentialprovider.DockerKeyring
+
+	podDestroyed map[string]*api.BoundPod
 }
 
 type ByCreated []*docker.Container
@@ -450,6 +458,18 @@ func (kl *Kubelet) getRef(id dockertools.DockerID) (ref *api.ObjectReference, ok
 	return ref, ok
 }
 
+func (kl *Kubelet) setDestroyedPod(uuid string, pod *api.BoundPod) {
+	kl.refLock.Lock()
+	defer kl.refLock.Unlock()
+	kl.podDestroyed[uuid] = pod
+}
+
+func (kl *Kubelet) clearDestroyedPod(uuid string) {
+	kl.refLock.Lock()
+	defer kl.refLock.Unlock()
+	delete(kl.podDestroyed, uuid)
+}
+
 // Run a single container from a pod. Returns the docker container ID
 func (kl *Kubelet) runContainer(pod *api.BoundPod, container *api.Container, podVolumes volumeMap, netMode string) (id dockertools.DockerID, err error) {
 	ref, err := containerRef(pod, container)
@@ -551,6 +571,14 @@ func (kl *Kubelet) runContainer(pod *api.BoundPod, container *api.Container, pod
 		if err := kl.addDiskQuota(dockerContainer.ID, container.Name, container.Disk); err != nil {
 			glog.Errorf("Failed to set up disk quota %v", err)
 			return "", err
+		}
+
+		// Set sriov if network mode eq "sriov"
+		if pod.Res.Network.Mode == sriovMode {
+			if err := kl.setupSriov(dockerContainer.ID, pod); err != nil {
+				glog.Errorf("Failed to Set up sriov: %v", err)
+				return "", err
+			}
 		}
 		if container.Blkio != nil {
 			blkio := &BlkioGroup{}
@@ -921,9 +949,38 @@ func (kl *Kubelet) reconcileVolumes(pods []api.BoundPod) error {
 	return nil
 }
 
+// Comares the map of current boundpod to the map of destoryed boundpod.
+// and remove orphaned boundpod related information
+func (kl *Kubelet) cleanPodRelatedInfo(pods []api.BoundPod) error {
+	desiredPods := make(map[string]api.BoundPod)
+	for _, pod := range pods {
+		uuid := pod.UID
+		desiredPods[uuid] = pod
+	}
+
+	for uuid, pod := range kl.podDestroyed {
+		if _, ok := desiredPods[uuid]; !ok {
+			// Stop lxcfs process
+			if err := kl.OpLxcfs(pod.Name, "stop"); err != nil {
+				glog.Errorf("Failed to stop lxcfs for %s: %v", pod.Name, err)
+			}
+			// Reset virtual function device MAC address
+			if pod.Res.Network.Mode == sriovMode {
+				if err := kl.setupVFMacAddress(&pod.Res.Network); err != nil {
+					glog.Errorf("Failed to setup vf mac address: %v", err)
+				}
+			}
+			kl.clearDestroyedPod(uuid)
+		}
+	}
+
+	return nil
+}
+
 // SyncPods synchronizes the configured list of pods (desired state) with the host current state.
 func (kl *Kubelet) SyncPods(pods []api.BoundPod) error {
 	glog.V(4).Infof("Desired: %#v", pods)
+	glog.V(4).Infof("Destroyed: %#v", kl.podDestroyed)
 	var err error
 	desiredContainers := make(map[podContainer]empty)
 	desiredPods := make(map[string]empty)
@@ -940,6 +997,7 @@ func (kl *Kubelet) SyncPods(pods []api.BoundPod) error {
 		podFullName := GetPodFullName(pod)
 		uuid := pod.UID
 		desiredPods[uuid] = empty{}
+		kl.setDestroyedPod(uuid, pod)
 
 		// Add all containers (including net) to the map.
 		desiredContainers[podContainer{podFullName, uuid, networkContainerName}] = empty{}
@@ -971,17 +1029,15 @@ func (kl *Kubelet) SyncPods(pods []api.BoundPod) error {
 			if err != nil {
 				glog.Errorf("Error killing container %+v: %v", pc, err)
 			}
-			if containerName != networkContainerName {
-				// when destroy pod then stop lxcf here
-				if err := kl.OpLxcfs(containerName, "stop"); err != nil {
-					glog.Errorf("Failed to stop lxcfs for %s: %v", containerName, err)
-				}
-			}
 		}
 	}
 
 	// Remove any orphaned volumes.
 	kl.reconcileVolumes(pods)
+
+	// Remove orphaned pod related information
+	// e.g : stop lxcfs process and reset vf MAC address
+	kl.cleanPodRelatedInfo(pods)
 
 	return err
 }
@@ -1140,14 +1196,92 @@ func (kl *Kubelet) setupNetwork(id dockertools.DockerID, pod *api.BoundPod) (str
 
 	//ex:"172.16.213.190/16@172.16.213.2"
 	ipAndGw := network.Address + "@" + network.Gateway
+	var execCmd []string
 
-	cmd := exec.Command("pipework", network.Bridge, string(id), ipAndGw, network.MacAddress)
+	switch network.Mode {
+	case sriovMode:
+		execCmd = append([]string{defaultDevice, "--vf", network.VfID, string(id), ipAndGw, fmt.Sprintf("%s@%d", network.MacAddress, network.VlanID)})
+		break
+	case bridgeMode:
+		execCmd = append([]string{network.Bridge, string(id), ipAndGw, network.MacAddress})
+		break
+	default:
+		return "", fmt.Errorf("Network mode does not support %s", network.Mode)
+	}
+
+	cmd := exec.Command("pipework", execCmd...)
 	cmd.Dir = "/usr/local/bin"
 	cmd.Stderr = &out
 	glog.V(4).Infof("setup network: %#v", cmd.Args)
 
 	err := cmd.Run()
 	return out.String(), err
+}
+
+// setup sriov for container
+func (kl *Kubelet) setupSriov(containerID string, pod *api.BoundPod) error {
+	var out bytes.Buffer
+	network := pod.Res.Network
+
+	data, err := kl.dockerClient.InspectContainer(containerID)
+	if err != nil {
+		return err
+	}
+
+	// Get CpuSet from Inspect Info
+	parts := strings.Split(data.Config.CpuSet, ",")
+	irqCpu, err := util.HexCpuSet(parts[0])
+	if err != nil {
+		return err
+	}
+	rpsCpus, err := util.HexCpuSet(data.Config.CpuSet)
+	if err != nil {
+		return err
+	}
+
+	cmd := exec.Command("sriov", containerID, network.VfID, irqCpu, rpsCpus)
+	cmd.Dir = "/usr/local/bin"
+	cmd.Stderr = &out
+	glog.V(3).Infof("setup sriov: %#v", cmd.Args)
+
+	if err = cmd.Run(); err != nil {
+		glog.Errorf("error: %+v -- %s", err, out.String())
+		return err
+	}
+
+	return nil
+}
+
+// setup sriov virtual function mac address
+func (kl *Kubelet) setupVFMacAddress(network *api.Network) error {
+	out, err := exec.Command("ls", fmt.Sprintf("/sys/class/net/%s/device/virtfn%s/net", defaultDevice, network.VfID)).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%v: %s", err, string(out))
+	}
+	vfDevice := strings.Replace(strings.Trim(string(out), "\r\n"), "\n", "", -1)
+	if vfDevice == "" {
+		return fmt.Errorf("Cloud not find virtual function device by vf_index:%s", network.VfID)
+	}
+	address := []string{"14", "05", "00", "00", "00", "00"}
+	parts := strings.Split(network.MacAddress, ":")
+	if len(parts) == 6 {
+		// default the first three octets
+		address[0] = parts[0]
+		address[1] = parts[1]
+	}
+	rand.Seed(time.Now().UTC().UnixNano())
+	for i := 3; i < 6; i++ {
+		address[i] = fmt.Sprintf("%02s", strconv.FormatInt(rand.Int63n(255), 16))
+	}
+
+	cmd := fmt.Sprintf("ip link set dev %s address %s", vfDevice, strings.Join(address, ":"))
+	glog.V(3).Infof("Setup virtfn%s device address: '%s'", network.VfID, cmd)
+	out, err = exec.Command("/bin/sh", "-c", cmd).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%v: %s", err, string(out))
+	}
+
+	return nil
 }
 
 // BirthCry sends an event that the kubelet has started up.
@@ -1337,11 +1471,9 @@ func (kl *Kubelet) opPodStartContainer(pod *api.BoundPod) error {
 		latestContainer := deadContainers[0]
 
 		// start lxcf befor create container
-		if container.Name != networkContainerName {
-			if err = kl.OpLxcfs(container.Name, "start"); err != nil {
-				glog.Errorf("Failed to start lxcfs for %s: %v", container.Name, err)
-				return err
-			}
+		if err = kl.OpLxcfs(container.Name, "start"); err != nil {
+			glog.Errorf("Failed to start lxcfs for %s: %v", container.Name, err)
+			return err
 		}
 
 		err = kl.dockerClient.StartContainer(latestContainer.ID, &docker.HostConfig{
@@ -1360,6 +1492,13 @@ func (kl *Kubelet) opPodStartContainer(pod *api.BoundPod) error {
 		if err := kl.addDiskQuota(latestContainer.ID, container.Name, container.Disk); err != nil {
 			glog.Errorf("Failed to set up disk quota %v", err)
 			return err
+		}
+		// Set sriov if network mode eq "sriov"
+		if pod.Res.Network.Mode == sriovMode {
+			if err := kl.setupSriov(latestContainer.ID, pod); err != nil {
+				glog.Errorf("Failed to Set up sriov: %v", err)
+				return err
+			}
 		}
 		// set blkio
 		if container.Blkio != nil {
@@ -1692,8 +1831,12 @@ func (kl *Kubelet) UpdatePodCgroup(podFullName string, podConfig *PodConfig) err
 		return err
 	}
 
+	isUpdateCpu := false
 	for _, entry := range podConfig.WriteSubsystem {
 		writeSubsystem = append(writeSubsystem, docker.KeyValuePair{Key: entry.Key, Value: entry.Value})
+		if strings.Contains(entry.Key, "cpuset") {
+			isUpdateCpu = true
+		}
 	}
 
 	for _, container := range pod.Spec.Containers {
@@ -1706,18 +1849,26 @@ func (kl *Kubelet) UpdatePodCgroup(podFullName string, podConfig *PodConfig) err
 				glog.Errorf("Update cgroup on container %s.%s  %s error: %v", podFullName, container.Name, dockerContainer.ID, err)
 				return err
 			}
+			// When change pod cpu and network mode eq "sriov",Should be setup pod sriov
+			if isUpdateCpu && pod.Res.Network.Mode == sriovMode {
+				if err := kl.setupSriov(dockerContainer.ID, pod); err != nil {
+					glog.Errorf("Failed to Set up sriov: %v", err)
+					return err
+				}
+			}
 		}
 	}
 
 	return nil
 }
 
-// Get pod memory stats
+// Get pod stats and spec info
 // TODO(hbo)
-func (kl *Kubelet) GetPodStats(podFullName string, stats *info.ContainerStats) error {
+func (kl *Kubelet) GetPodStats(podFullName string) (*info.ContainerInfo, error) {
 	var (
-		err error
-		pod *api.BoundPod
+		err   error
+		pod   *api.BoundPod
+		cinfo *info.ContainerInfo
 	)
 
 	for i, size := 0, len(kl.pods); i < size; i++ {
@@ -1729,25 +1880,26 @@ func (kl *Kubelet) GetPodStats(podFullName string, stats *info.ContainerStats) e
 	}
 	if pod == nil {
 		glog.Errorf("Can't find pod: %s", podFullName)
-		return dockertools.ErrNoContainersInPod
+		return nil, dockertools.ErrNoContainersInPod
 	}
 	dockerContainers, err := dockertools.GetKubeletDockerContainers(kl.dockerClient, false)
 	if err != nil {
 		glog.Errorf("Error listing containers: %#v", dockerContainers)
-		return err
+		return nil, err
 	}
 
 	for _, container := range pod.Spec.Containers {
 		if dockerContainer, found, _ := dockerContainers.FindPodContainer(podFullName, pod.UID, container.Name); found {
-			err := dockertools.GetDockerContainerStats(dockerContainer.ID, stats)
+			cinfo, err = dockertools.GetDockerContainerStats(dockerContainer.ID)
 			if err != nil {
-				glog.Errorf("Get container %s cgroup stats error: %v", dockerContainer.ID, err)
-				return err
+				glog.Errorf("Get container %s stats error: %v", dockerContainer.ID, err)
+				return nil, err
 			}
 		}
 	}
+	cinfo.ContainerReference.Name = podFullName
 
-	return nil
+	return cinfo, nil
 }
 
 // The comparison of container, to determine whether to auto restart container
