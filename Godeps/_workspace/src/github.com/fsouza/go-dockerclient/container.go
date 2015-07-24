@@ -735,17 +735,29 @@ type CgroupConfig struct {
 	WriteSubsystem []KeyValuePair `json:"WriteSubsystem,omitempty" yaml:"WriteSubsystem,omitempty"`
 }
 
-func (c *Client) UpdateContainerCgroup(id string, cgroupConfig *CgroupConfig) error {
+type CgroupResponse struct {
+	Subsystem string `json:"subsystem,omitempty" yaml:"subsystem,omitempty"`
+	Out       string `json:"out,omitempty" yaml:"out,omitempty"`
+	Err       string `json:"err,omitempty" yaml:"err,omitempty"`
+	Status    int    `json:"status,omitempty" yaml:"status,omitempty"`
+}
+
+func (c *Client) UpdateContainerCgroup(id string, cgroupConfig *CgroupConfig) ([]CgroupResponse, error) {
 	if cgroupConfig == nil {
-		return fmt.Errorf("CgroupConfig is nil: %v", cgroupConfig)
+		return nil, fmt.Errorf("CgroupConfig is nil: %v", cgroupConfig)
 	}
 	path := "/containers/" + id + "/cgroup?w=1"
-	_, status, err := c.do("POST", path, cgroupConfig)
+	body, status, err := c.do("POST", path, cgroupConfig)
 	if status == http.StatusNotFound {
-		return &NoSuchContainer{ID: id}
+		return nil, &NoSuchContainer{ID: id}
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	var resp []CgroupResponse
+	err = json.Unmarshal(body, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }

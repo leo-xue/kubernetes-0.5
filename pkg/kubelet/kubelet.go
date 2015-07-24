@@ -1841,10 +1841,12 @@ func (kl *Kubelet) UpdatePodCgroup(podFullName string, podConfig *PodConfig) err
 
 	for _, container := range pod.Spec.Containers {
 		if dockerContainer, found, _ := dockerContainers.FindPodContainer(podFullName, pod.UID, container.Name); found {
-			glog.V(3).Infof("Update container(%s - %s) cgroup: %+v", container.Name, dockerContainer.ID, writeSubsystem)
-			err = kl.dockerClient.UpdateContainerCgroup(dockerContainer.ID, &docker.CgroupConfig{
+			resp, err := kl.dockerClient.UpdateContainerCgroup(dockerContainer.ID, &docker.CgroupConfig{
 				WriteSubsystem: writeSubsystem,
 			})
+			
+			glog.V(3).Infof("Update container(%s - %s) cgroup: %+v\n\t result:%+v", container.Name, dockerContainer.ID, writeSubsystem,resp)
+			
 			if err != nil {
 				glog.Errorf("Update cgroup on container %s.%s  %s error: %v", podFullName, container.Name, dockerContainer.ID, err)
 				return err

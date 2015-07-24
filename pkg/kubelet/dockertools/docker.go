@@ -53,7 +53,7 @@ type DockerInterface interface {
 	Version() (*docker.Env, error)
 	CreateExec(docker.CreateExecOptions) (*docker.Exec, error)
 	StartExec(string, docker.StartExecOptions) error
-	UpdateContainerCgroup(id string, cgroupConfig *docker.CgroupConfig) error
+	UpdateContainerCgroup(id string, cgroupConfig *docker.CgroupConfig) ([]docker.CgroupResponse, error)
 }
 
 // DockerID is an ID of docker container. It is a type to make it clear when we're working with docker container Ids
