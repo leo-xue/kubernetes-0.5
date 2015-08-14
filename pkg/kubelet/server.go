@@ -75,6 +75,7 @@ type HostInterface interface {
 	PushImage(params *PushImageParams) error
 	UpdatePodCgroup(podFullName string, podConfig *PodConfig) error
 	GetPodStats(podFullName string, stats *info.ContainerStats) error
+	UpdatePodDisk(podFullName string, podConfig *PodConfig) error
 }
 
 // NewServer initializes and configures a kubelet.Server object to handle HTTP requests.
@@ -624,6 +625,38 @@ func (s *Server) handlePodUpgrade(w http.ResponseWriter, req *http.Request) {
 			result.Code = 1
 			result.ErrorMsg = fmt.Sprintf("%v", err)
 		}
+	case "disk":
+		var params PodConfig
+		if err = json.Unmarshal(body, &params); err != nil {
+			s.error(w, err)
+			return
+		}
+		if len(params.PodID) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			http.Error(w, "Missing 'podID' post entry.", http.StatusBadRequest)
+			return
+		}
+		if len(params.PodNamespace) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			http.Error(w, "Missing 'podNamespace' post entry.", http.StatusBadRequest)
+			return
+		}
+		if len(params.WriteSubsystem) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			http.Error(w, "Missing 'writeSubsystem' post entry.", http.StatusBadRequest)
+			return
+		}
+		podFullName := GetPodFullName(&api.BoundPod{
+			ObjectMeta: api.ObjectMeta{
+				Name:        params.PodID,
+				Namespace:   params.PodNamespace,
+				Annotations: map[string]string{ConfigSourceAnnotationKey: "etcd"},
+			},
+		})
+		if err = s.host.UpdatePodDisk(podFullName, &params); err != nil {
+			result.Code = 1
+			result.ErrorMsg = fmt.Sprintf("%v", err)
+		}
 	default:
 		s.error(w, fmt.Errorf("unknown method %s", method))
 		return
@@ -639,4 +672,3 @@ func (s *Server) handlePodUpgrade(w http.ResponseWriter, req *http.Request) {
 	w.Header().Add("Content-type", "application/json")
 	w.Write(data)
 }
-

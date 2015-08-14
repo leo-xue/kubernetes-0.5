@@ -1712,6 +1712,60 @@ func (kl *Kubelet) UpdatePodCgroup(podFullName string, podConfig *PodConfig) err
 	return nil
 }
 
+// addDiskQuota set up disk queta on pod
+func (kl *Kubelet) UpdatePodDisk(podFullName string, podConfig *PodConfig) error {
+	var (
+		err            error
+		pod            *api.BoundPod
+		disk           int
+	)
+
+	for i, size := 0, len(kl.pods); i < size; i++ {
+		p := &kl.pods[i]
+		if GetPodFullName(p) == podFullName {
+			pod = p
+			break
+		}
+	}
+	if pod == nil {
+		glog.Errorf("Can't find pod: %s", podFullName)
+		return dockertools.ErrNoContainersInPod
+	}
+	dockerContainers, err := dockertools.GetKubeletDockerContainers(kl.dockerClient, false)
+	if err != nil {
+		glog.Errorf("Error listing containers: %#v", dockerContainers)
+		return err
+	}
+
+	for _, entry := range podConfig.WriteSubsystem {
+		if(entry.Key == "disk_new_size"){ 
+		    disk,err = strconv.Atoi(entry.Value)
+		}
+		if err != nil {
+           glog.Errorf("strconv.ParseInt disk to int error, entry.Value %s", entry.Value)
+        }
+	}
+
+
+
+	// when disk <= 0 then skip addDiskQuota
+	if disk <= 0 {
+		glog.V(3).Infof("Container:%s disk set to %d, addDiskQuota ignore", podFullName, disk)
+		return nil
+	}
+
+    disk = disk /1024/1024/1024
+	for _, container := range pod.Spec.Containers {
+		out, err1 := exec.Command("xfs_quota", "-x", "-c", fmt.Sprintf("limit -p bhard=%dg %s", disk, container.Name), "/data").CombinedOutput()
+		glog.V(3).Infof("Exec Command %s out: %s", fmt.Sprintf("limit -p bhard=%dg %s", disk, container.Name), string(out))
+		if err1 != nil {
+			return err
+		}		
+	}
+
+	return nil
+}
+
 // Get pod memory stats
 // TODO(hbo)
 func (kl *Kubelet) GetPodStats(podFullName string, stats *info.ContainerStats) error {
@@ -1760,4 +1814,3 @@ func (kl *Kubelet) compare(container api.Container, dockerContainer *docker.APIC
 	// compare disk\io\cpu\memory
 	return 0
 }
-
