@@ -25,6 +25,10 @@ type CpuSpec struct {
 	Mask     string `json:"mask,omitempty"`
 }
 
+type CpusetSpec struct {
+	Cpus string `json:"cpus"`
+}
+
 type MemorySpec struct {
 	// The amount of memory requested. Default is unlimited (-1).
 	// Units: bytes.
@@ -40,8 +44,9 @@ type MemorySpec struct {
 }
 
 type ContainerSpec struct {
-	HasCpu bool    `json:"has_cpu"`
-	Cpu    CpuSpec `json:"cpu,omitempty"`
+	HasCpu bool       `json:"has_cpu"`
+	Cpu    CpuSpec    `json:"cpu,omitempty"`
+	Cpuset CpusetSpec `json:"cpuset,omitempty"`
 
 	HasMemory bool       `json:"has_memory"`
 	Memory    MemorySpec `json:"memory,omitempty"`

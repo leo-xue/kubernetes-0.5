@@ -301,6 +301,9 @@ func (r *Registry) UpdatePod(ctx api.Context, pod *api.Pod) error {
 		for ix := range boundPods.Items {
 			if boundPods.Items[ix].Name == pod.Name {
 				boundPods.Items[ix].Spec = pod.Spec
+				// sync cpuset and network
+				boundPods.Items[ix].Res.Network = pod.Status.Network
+				boundPods.Items[ix].Res.CpuSet = pod.Status.CpuSet
 				return boundPods, nil
 			}
 		}

@@ -833,6 +833,12 @@ type Network struct {
 
 	// Gateway sets the gateway address that is used as the default for the interface
 	Gateway string `json:"gateway,omitempty" yaml:"gateway,omitempty"`
+
+	// SR-IOV Virtual Function index
+	VfID string `json:"vfID,omitempty" yaml:"vfID,omitempty"`
+
+	// VLAN ID
+	VlanID int `json:"vlanID,omitempty" yaml:"vlanID,omitempty"`
 }
 
 //vm
@@ -847,4 +853,6 @@ type VM struct {
 	VlanID int `json:"vlanID,omitempty" yaml:"vlanID,omitempty"`
 	// MacAddress contains the MAC address to set on the network interface
 	MacAddress string `json:"macAddress,omitempty" yaml:"macAddress,omitempty"`
+	// SR-IOV Virtual Function index
+	VfID string `json:"vfID,omitempty" yaml:"vfID,omitempty"`
 }

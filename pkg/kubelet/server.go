@@ -74,8 +74,8 @@ type HostInterface interface {
 	OpPod(podFullName, podOp string) error
 	PushImage(params *PushImageParams) error
 	UpdatePodCgroup(podFullName string, podConfig *PodConfig) error
-	GetPodStats(podFullName string, stats *info.ContainerStats) error
 	UpdatePodDisk(podFullName string, podConfig *PodConfig) error
+	GetPodStats(podFullName string) (*info.ContainerInfo, error)
 }
 
 // NewServer initializes and configures a kubelet.Server object to handle HTTP requests.
@@ -409,19 +409,7 @@ func (s *Server) serveStats(w http.ResponseWriter, req *http.Request) {
 				Annotations: map[string]string{ConfigSourceAnnotationKey: "etcd"},
 			},
 		})
-		stats = new(info.ContainerInfo)
-		stats.Stats = make([]*info.ContainerStats, 1)
-		memoryStats := &info.MemoryStats{Stats: make(map[string]uint64)}
-		containerStats := &info.ContainerStats{
-			Timestamp: time.Now(),
-			Memory:    memoryStats,
-		}
-		if err = s.host.GetPodStats(podFullName, containerStats); err != nil {
-			http.Error(w, fmt.Sprintf("get pod: %s stats error: %v", podFullName, err), http.StatusNotFound)
-			return
-		}
-		stats.Stats[0] = containerStats
-		stats.ContainerReference.Name = podFullName
+		stats, err = s.host.GetPodStats(podFullName)
 	case 3:
 		// Backward compatibility without uuid information
 		podFullName := GetPodFullName(&api.BoundPod{

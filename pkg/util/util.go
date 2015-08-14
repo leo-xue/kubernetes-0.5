@@ -19,8 +19,11 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/golang/glog"
@@ -149,4 +152,27 @@ func CompileRegexps(regexpStrings []string) ([]*regexp.Regexp, error) {
 		regexps = append(regexps, r)
 	}
 	return regexps, nil
+}
+
+// Convert cpu from string to hex
+// e.g.
+// 			   Binary       Hex
+//    CPU 0    0001         1
+//    CPU 1    0010         2
+//    CPU 2    0100         4
+//    CPU 3    1000         8
+func HexCpuSet(cpuSet string) (string, error) {
+	if cpuSet == "" {
+		return "", fmt.Errorf("Cpu Set must be not null")
+	}
+	var value uint64 = 0
+	for _, core := range strings.Split(cpuSet, ",") {
+		fCore, err := strconv.ParseFloat(core, 64)
+		if err != nil {
+			return "", err
+		}
+		value ^= uint64(math.Pow(2, fCore))
+	}
+
+	return strconv.FormatUint(value, 16), nil
 }

@@ -297,10 +297,17 @@ func allocNetwork(pod api.Pod, podLister PodLister, node api.Minion) (api.Networ
 		}
 
 		if used == false {
+			if sriov, exists := pod.Spec.NodeSelector["sriov"]; exists && sriov == "1" {
+				network.Mode = "sriov"
+				network.VlanID = vms[i].VlanID
+				network.VfID = vms[i].VfID
+			} else {
+				network.Mode = pod.Spec.NetworkMode
+				network.Bridge = fmt.Sprintf("br%d", vms[i].VlanID)
+			}
 			network.Address = vms[i].Address
 			network.Gateway = vms[i].Gateway
-			network.Bridge = fmt.Sprintf("br%d", vms[i].VlanID)
-			network.Mode = pod.Spec.NetworkMode
+
 			if vms[i].MacAddress != "" {
 				network.MacAddress = vms[i].MacAddress
 			}
