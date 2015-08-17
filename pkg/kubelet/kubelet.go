@@ -1215,6 +1215,9 @@ func (kl *Kubelet) setupNetwork(id dockertools.DockerID, pod *api.BoundPod) (str
 	glog.V(4).Infof("setup network: %#v", cmd.Args)
 
 	err := cmd.Run()
+    if err != nil {
+		glog.Errorf("error: %+v -- %s", err, out.String())
+	}
 	return out.String(), err
 }
 
