@@ -1909,7 +1909,6 @@ func (kl *Kubelet) UpdatePodDisk(podFullName string, podConfig *PodConfig) error
 		return nil
 	}
 
-    disk = disk /1024/1024/1024
 	for _, container := range pod.Spec.Containers {
 		out, err1 := exec.Command("xfs_quota", "-x", "-c", fmt.Sprintf("limit -p bhard=%dg %s", disk, container.Name), "/data").CombinedOutput()
 		glog.V(3).Infof("Exec Command %s out: %s", fmt.Sprintf("limit -p bhard=%dg %s", disk, container.Name), string(out))
