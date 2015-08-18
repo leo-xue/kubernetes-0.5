@@ -196,6 +196,13 @@ func (n *NodeSelector) PodSelectorMatches(pod api.Pod, existingPods []api.Pod, n
 			active = false
 		}
 	}
+
+	if _, e1 := pod.Spec.NodeSelector["sriov"]; !e1 {
+		if sriov, e2 := minion.Labels["sriov"]; e2 && sriov == "1" {
+			return false, nil
+		}
+	}
+
 	return selector.Matches(labels.Set(minion.Labels)) && active, nil
 }
 
