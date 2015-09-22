@@ -1200,8 +1200,12 @@ func (kl *Kubelet) setupNetwork(id dockertools.DockerID, pod *api.BoundPod) (str
 
 	switch network.Mode {
 	case sriovMode:
-		execCmd = append([]string{defaultDevice, "--vf", network.VfID, string(id), ipAndGw, fmt.Sprintf("%s@%d", network.MacAddress, network.VlanID)})
-		break
+		vlanID := 0
+		if network.VlanID > 0 {
+			vlanID = network.VlanID
+		}
+		execCmd = append([]string{defaultDevice, "--vf", network.VfID, string(id), ipAndGw, fmt.Sprintf("%s@%d", network.MacAddress, vlanID)})
+		break	
 	case bridgeMode:
 		execCmd = append([]string{network.Bridge, string(id), ipAndGw, network.MacAddress})
 		break
@@ -1233,16 +1237,20 @@ func (kl *Kubelet) setupSriov(containerID string, pod *api.BoundPod) error {
 
 	// Get CpuSet from Inspect Info
 	parts := strings.Split(data.Config.CpuSet, ",")
-	irqCpu, err := util.HexCpuSet(parts[0])
-	if err != nil {
-		return err
+	var irqArray []string
+	for _, core := range parts {
+		irqCpu, err := util.HexCpuSet(core)
+		if err != nil {
+			return err
+		}
+		irqArray = append(irqArray, irqCpu)
 	}
 	rpsCpus, err := util.HexCpuSet(data.Config.CpuSet)
 	if err != nil {
 		return err
 	}
 
-	cmd := exec.Command("sriov", containerID, network.VfID, irqCpu, rpsCpus)
+	cmd := exec.Command("sriov", containerID, network.VfID, strings.Join(irqArray, ","), rpsCpus)
 	cmd.Dir = "/usr/local/bin"
 	cmd.Stderr = &out
 	glog.V(3).Infof("setup sriov: %#v", cmd.Args)

@@ -227,7 +227,15 @@ func (g *genericScheduler) numaCpuSelect(pod api.Pod, podLister PodLister, nodes
 			noNumaSelectMinion = index
 		}
 
-		freeCores2, err2 := cpuMap.Get0BitOffsNuma(uint(cpuNodeNum))
+		var (
+			freeCores2 [][]uint
+			err2       error
+		)
+		if val, exists := minion.Labels["numaflat"]; exists && val == "1" {
+			freeCores2, err2 = cpuMap.Get0BitOffsNumaVer(uint(cpuNodeNum))
+		} else {
+			freeCores2, err2 = cpuMap.Get0BitOffsNuma(uint(cpuNodeNum))
+		}
 		if err2 != nil {
 			return -1, nil, err2
 		}
