@@ -237,3 +237,24 @@ func (f *FakeDockerClient) UpdateContainerCgroup(id string, cgroupConfig *docker
 	f.called = append(f.called, "update")
 	return nil, f.Err
 }
+
+func (f *FakeDockerClient) UpdateContainerConfig(id string, conf []docker.KeyValuePair) error {
+	f.Lock()
+	defer f.Unlock()
+	f.called = append(f.called, "update")
+	return nil
+}
+
+func (f *FakeDockerClient) PullImageAndApply(opts docker.MergeImageOptions, auth docker.AuthConfiguration) error {
+	f.Lock()
+	defer f.Unlock()
+	f.called = append(f.called, "merge")
+	return nil
+}
+
+func (f *FakeDockerClient) DiffImageAndApply(opts docker.MergeImageOptions) error {
+	f.Lock()
+	defer f.Unlock()
+	f.called = append(f.called, "merge")
+	return nil
+}

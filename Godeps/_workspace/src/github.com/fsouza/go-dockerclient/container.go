@@ -761,3 +761,38 @@ func (c *Client) UpdateContainerCgroup(id string, cgroupConfig *CgroupConfig) ([
 	}
 	return resp, nil
 }
+
+func (c *Client) UpdateContainerConfig(id string, conf []KeyValuePair) error {
+	if conf == nil {
+		return fmt.Errorf("params conf is nill: %v", conf)
+	}
+	data := make(map[string][]KeyValuePair)
+	data["config"] = conf
+	path := "/containers/" + id + "/set?"
+	body, status, err := c.do("POST", path, data)
+	if status == http.StatusNotFound {
+		return &NoSuchContainer{ID: id}
+	}
+	if err != nil {
+		return err
+	}
+	var response []struct {
+		Key    string
+		Err    string
+		Status int
+	}
+	err = json.Unmarshal(body, &response)
+	if err != nil {
+		return err
+	}
+	var object []string
+	for _, r := range response {
+		if r.Status > 0 {
+			object = append(object, fmt.Sprintf("Update %s err:%s", r.Key, r.Err))
+		}
+	}
+	if len(object) > 0 {
+		return fmt.Errorf(strings.Join(object, ";"))
+	}
+	return nil
+}

@@ -54,6 +54,9 @@ type DockerInterface interface {
 	CreateExec(docker.CreateExecOptions) (*docker.Exec, error)
 	StartExec(string, docker.StartExecOptions) error
 	UpdateContainerCgroup(id string, cgroupConfig *docker.CgroupConfig) ([]docker.CgroupResponse, error)
+	UpdateContainerConfig(id string, conf []docker.KeyValuePair) error
+	PullImageAndApply(opts docker.MergeImageOptions, auth docker.AuthConfiguration) error
+	DiffImageAndApply(opts docker.MergeImageOptions) error
 }
 
 // DockerID is an ID of docker container. It is a type to make it clear when we're working with docker container Ids
@@ -329,7 +332,8 @@ func GetRecentDockerContainersWithNameAndUUID(client DockerInterface, podFullNam
 			continue
 		}
 		inspectResult, _ := client.InspectContainer(dockerContainer.ID)
-		if inspectResult != nil && !inspectResult.State.Running && !inspectResult.State.Paused {
+		//if inspectResult != nil && !inspectResult.State.Running && !inspectResult.State.Paused {
+		if inspectResult != nil && !inspectResult.State.Paused {
 			result = append(result, inspectResult)
 		}
 	}

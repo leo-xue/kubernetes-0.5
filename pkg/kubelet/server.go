@@ -53,8 +53,8 @@ func ListenAndServeKubeletServer(host HostInterface, updates chan<- interface{},
 	s := &http.Server{
 		Addr:           net.JoinHostPort(address.String(), strconv.FormatUint(uint64(port), 10)),
 		Handler:        &handler,
-		ReadTimeout:    5 * time.Minute,
-		WriteTimeout:   5 * time.Minute,
+		ReadTimeout:    60 * time.Minute,
+		WriteTimeout:   60 * time.Minute,
 		MaxHeaderBytes: 1 << 20,
 	}
 	glog.Fatal(s.ListenAndServe())
@@ -76,6 +76,7 @@ type HostInterface interface {
 	UpdatePodCgroup(podFullName string, podConfig *PodConfig) error
 	UpdatePodDisk(podFullName string, podConfig *PodConfig) error
 	GetPodStats(podFullName string) (*info.ContainerInfo, error)
+	MergeContainer(podFullName, image, op string) error
 }
 
 // NewServer initializes and configures a kubelet.Server object to handle HTTP requests.
@@ -642,6 +643,46 @@ func (s *Server) handlePodUpgrade(w http.ResponseWriter, req *http.Request) {
 			},
 		})
 		if err = s.host.UpdatePodDisk(podFullName, &params); err != nil {
+			result.Code = 1
+			result.ErrorMsg = fmt.Sprintf("%v", err)
+		}
+	case "merge":
+		var tmp struct {
+			PodID        string `json:"podID"`
+			PodNamespace string `json:"podNamespace"`
+			Image        string `json:"image"`
+			Op           string `json:"op"`
+		}
+		if err = json.Unmarshal(body, &tmp); err != nil {
+			s.error(w, err)
+			return
+		}
+		if len(tmp.PodID) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			http.Error(w, "Missing 'podID' post entry.", http.StatusBadRequest)
+			return
+		}
+		if len(tmp.PodNamespace) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			http.Error(w, "Missing 'podNamespace' post entry.", http.StatusBadRequest)
+			return
+		}
+		if len(tmp.Image) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			http.Error(w, "Missing 'image' post entry.", http.StatusBadRequest)
+			return
+		}
+		if len(tmp.Op) == 0 {
+			tmp.Op = "pull"
+		}
+		podFullName := GetPodFullName(&api.BoundPod{
+			ObjectMeta: api.ObjectMeta{
+				Name:        tmp.PodID,
+				Namespace:   tmp.PodNamespace,
+				Annotations: map[string]string{ConfigSourceAnnotationKey: "etcd"},
+			},
+		})
+		if err = s.host.MergeContainer(podFullName, tmp.Image, tmp.Op); err != nil {
 			result.Code = 1
 			result.ErrorMsg = fmt.Sprintf("%v", err)
 		}

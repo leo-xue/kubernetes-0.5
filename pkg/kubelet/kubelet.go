@@ -781,50 +781,17 @@ func (kl *Kubelet) syncPod(pod *api.BoundPod, dockerContainers dockertools.Docke
 
 	for _, container := range pod.Spec.Containers {
 		containerChanged := false
-		expectedHash := dockertools.HashContainer(&container)
-		if dockerContainer, found, hash := dockerContainers.FindPodContainer(podFullName, uuid, container.Name); found {
+		if dockerContainer, found, _ := dockerContainers.FindPodContainer(podFullName, uuid, container.Name); found {
 			containerID := dockertools.DockerID(dockerContainer.ID)
-			glog.V(3).Infof("pod %s container %s exists as %v", podFullName, container.Name, containerID)
-
-			ret := kl.compare(container, dockerContainer)
-			// look for changes in the container.
-			//if hash == 0 || hash == expectedHash {
-			if ret == 0 {
-				// TODO: This should probably be separated out into a separate goroutine.
-				healthy, err := kl.healthy(podFullName, uuid, podState, container, dockerContainer)
-				if err != nil {
-					glog.V(1).Infof("health check errored: %v", err)
-					containersToKeep[containerID] = empty{}
-					continue
-				}
-				if healthy == health.Healthy {
-					containersToKeep[containerID] = empty{}
-					continue
-				}
-				glog.V(1).Infof("pod %s container %s is unhealthy.", podFullName, container.Name, healthy)
-			} else if ret == 1 {
-				// TODO
-				glog.V(3).Info("do nothing")
-				continue
-			} else {
-				// Upgrade
-				containerChanged = true
-				glog.V(3).Infof("container hash changed %d vs %d.", hash, expectedHash)
+			healthy, err := kl.healthy(podFullName, uuid, podState, container, dockerContainer)
+			if err != nil {
+				glog.Errorf("health check errored: %v", err)
 			}
-
-			if err := kl.killContainer(dockerContainer); err != nil {
-				glog.V(1).Infof("Failed to kill container %s: %v", dockerContainer.ID, err)
-				continue
+			if healthy == health.Healthy {
+				glog.V(1).Infof("Container %s(%s) is healthy", container.Name, containerID)
 			}
-			killedContainers[containerID] = empty{}
-			/* Never kill network container
-			// Also kill associated network container
-			if netContainer, found, _ := dockerContainers.FindPodContainer(podFullName, uuid, networkContainerName); found {
-				if err := kl.killContainer(netContainer); err != nil {
-					glog.V(1).Infof("Failed to kill network container %s: %v", netContainer.ID, err)
-					continue
-				}
-			} */
+			containersToKeep[containerID] = empty{}
+			continue
 		}
 
 		// Check RestartPolicy for container
@@ -1205,7 +1172,7 @@ func (kl *Kubelet) setupNetwork(id dockertools.DockerID, pod *api.BoundPod) (str
 			vlanID = network.VlanID
 		}
 		execCmd = append([]string{defaultDevice, "--vf", network.VfID, string(id), ipAndGw, fmt.Sprintf("%s@%d", network.MacAddress, vlanID)})
-		break	
+		break
 	case bridgeMode:
 		execCmd = append([]string{network.Bridge, string(id), ipAndGw, network.MacAddress})
 		break
@@ -1219,7 +1186,7 @@ func (kl *Kubelet) setupNetwork(id dockertools.DockerID, pod *api.BoundPod) (str
 	glog.V(4).Infof("setup network: %#v", cmd.Args)
 
 	err := cmd.Run()
-    if err != nil {
+	if err != nil {
 		glog.Errorf("error: %+v -- %s", err, out.String())
 	}
 	return out.String(), err
@@ -1632,7 +1599,7 @@ func (kl *Kubelet) PushImage(params *PushImageParams) error {
 			containerID = commitContainers[0].ID
 			break
 		} else {
-			err = fmt.Errorf("Container with name %s--%s--%s doesn't exist, creating %#v", podFullName, pod.UID, container.Name, container)
+			err = fmt.Errorf("Container with name %s--%s--%s doesn't exist, %#v", podFullName, pod.UID, container.Name, container)
 			glog.Error(err)
 			return err
 		}
@@ -1659,6 +1626,7 @@ func (kl *Kubelet) PushImage(params *PushImageParams) error {
 		glog.Errorf("Failed to commit container: %s, error: %v", containerID, err)
 		return err
 	}
+	glog.V(3).Info("Commit successfully")
 
 	// push image
 	imageOpts := docker.PushImageOptions{
@@ -1673,6 +1641,14 @@ func (kl *Kubelet) PushImage(params *PushImageParams) error {
 	err = kl.dockerClient.PushImage(imageOpts, creds)
 	if err != nil {
 		glog.Errorf("Failed to push image: %s, error: %v", repo, err)
+		return err
+	}
+	glog.V(3).Info("Push successfully")
+
+	// update docker container info
+	var conf []docker.KeyValuePair
+	conf = append(conf, docker.KeyValuePair{Key: "image", Value: params.Image})
+	if err = kl.dockerClient.UpdateContainerConfig(containerID, conf); err != nil {
 		return err
 	}
 
@@ -1855,9 +1831,9 @@ func (kl *Kubelet) UpdatePodCgroup(podFullName string, podConfig *PodConfig) err
 			resp, err := kl.dockerClient.UpdateContainerCgroup(dockerContainer.ID, &docker.CgroupConfig{
 				WriteSubsystem: writeSubsystem,
 			})
-			
-			glog.V(3).Infof("Update container(%s - %s) cgroup: %+v\n\t result:%+v", container.Name, dockerContainer.ID, writeSubsystem,resp)
-			
+
+			glog.V(3).Infof("Update container(%s - %s) cgroup: %+v\n\t result:%+v", container.Name, dockerContainer.ID, writeSubsystem, resp)
+
 			if err != nil {
 				glog.Errorf("Update cgroup on container %s.%s  %s error: %v", podFullName, container.Name, dockerContainer.ID, err)
 				return err
@@ -1878,9 +1854,9 @@ func (kl *Kubelet) UpdatePodCgroup(podFullName string, podConfig *PodConfig) err
 // addDiskQuota set up disk queta on pod
 func (kl *Kubelet) UpdatePodDisk(podFullName string, podConfig *PodConfig) error {
 	var (
-		err            error
-		pod            *api.BoundPod
-		disk           int
+		err  error
+		pod  *api.BoundPod
+		disk int
 	)
 
 	for i, size := 0, len(kl.pods); i < size; i++ {
@@ -1901,15 +1877,13 @@ func (kl *Kubelet) UpdatePodDisk(podFullName string, podConfig *PodConfig) error
 	}
 
 	for _, entry := range podConfig.WriteSubsystem {
-		if(entry.Key == "disk_new_size"){ 
-		    disk,err = strconv.Atoi(entry.Value)
+		if entry.Key == "disk_new_size" {
+			disk, err = strconv.Atoi(entry.Value)
 		}
 		if err != nil {
-           glog.Errorf("strconv.ParseInt disk to int error, entry.Value %s", entry.Value)
-        }
+			glog.Errorf("strconv.ParseInt disk to int error, entry.Value %s", entry.Value)
+		}
 	}
-
-
 
 	// when disk <= 0 then skip addDiskQuota
 	if disk <= 0 {
@@ -1922,7 +1896,7 @@ func (kl *Kubelet) UpdatePodDisk(podFullName string, podConfig *PodConfig) error
 		glog.V(3).Infof("Exec Command %s out: %s", fmt.Sprintf("limit -p bhard=%dg %s", disk, container.Name), string(out))
 		if err1 != nil {
 			return err
-		}		
+		}
 	}
 
 	return nil
@@ -1966,6 +1940,75 @@ func (kl *Kubelet) GetPodStats(podFullName string) (*info.ContainerInfo, error) 
 	cinfo.ContainerReference.Name = podFullName
 
 	return cinfo, nil
+}
+
+func (kl *Kubelet) MergeContainer(podFullName, image, op string) error {
+	var (
+		err error
+		pod *api.BoundPod
+	)
+
+	for i, size := 0, len(kl.pods); i < size; i++ {
+		p := &kl.pods[i]
+		if GetPodFullName(p) == podFullName {
+			pod = p
+			break
+		}
+	}
+	if pod == nil {
+		glog.Errorf("Can't find pod: %s", podFullName)
+		return dockertools.ErrNoContainersInPod
+	}
+	dockerContainers, err := dockertools.GetKubeletDockerContainers(kl.dockerClient, false)
+	if err != nil {
+		glog.Errorf("Error listing containers: %#v", dockerContainers)
+		return err
+	}
+
+	_, repo, tag := dockertools.ParseImageName(image)
+	if tag == "" {
+		return fmt.Errorf("Missing tag: %s", image)
+	}
+
+	for _, container := range pod.Spec.Containers {
+		if dockerContainer, found, _ := dockerContainers.FindPodContainer(podFullName, pod.UID, container.Name); found {
+			img, err := kl.dockerClient.InspectImage(dockerContainer.Image)
+			if err != nil {
+				return fmt.Errorf("Failed to inspect image: %s", dockerContainer.Image)
+			}
+			imageOpts := docker.MergeImageOptions{
+				Container:    dockerContainer.ID,
+				CurrentImage: img.ID,
+				Repository:   image,
+			}
+			if op == "pull" {
+				creds, ok := kl.keyring.Lookup(repo)
+				if !ok {
+					glog.V(1).Infof("Pull image: %s without credentials", repo)
+				}
+				if err = kl.dockerClient.PullImageAndApply(imageOpts, creds); err != nil {
+					return err
+				}
+			} else if op == "diff" {
+				if err = kl.dockerPuller.Pull(image); err != nil {
+					return err
+				}
+				if err = kl.dockerClient.DiffImageAndApply(imageOpts); err != nil {
+					return err
+				}
+			} else {
+				return fmt.Errorf("Parameter error: op => %s", op)
+			}
+			// update docker container info
+			var conf []docker.KeyValuePair
+			conf = append(conf, docker.KeyValuePair{Key: "image", Value: image})
+			glog.V(3).Infof("Update container config: %v ", conf)
+			if err = kl.dockerClient.UpdateContainerConfig(dockerContainer.ID, conf); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // The comparison of container, to determine whether to auto restart container

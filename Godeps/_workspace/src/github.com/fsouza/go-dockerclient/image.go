@@ -415,3 +415,43 @@ func (c *Client) SearchImages(term string) ([]APIImageSearch, error) {
 	}
 	return searchResult, nil
 }
+
+type MergeImageOptions struct {
+	Container    string `qs:"container"`
+	CurrentImage string `qs:"currentImage"`
+	Repository    string `qs:"fromImage"`
+	Registry      string
+	Tag           string
+	OutputStream  io.Writer `qs:"-"`
+	RawJSONStream bool      `qs:"-"`
+}
+
+func (c *Client) PullImageAndApply(opts MergeImageOptions, auth AuthConfiguration) error {
+	if opts.Repository == "" {
+		return ErrNoSuchImage
+	}
+	if opts.Container == "" || opts.CurrentImage == "" {
+		return fmt.Errorf("missing container ID or Image")
+	}
+
+	var headers = make(map[string]string)
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(auth)
+	headers["X-Registry-Auth"] = base64.URLEncoding.EncodeToString(buf.Bytes())
+
+	path := "/images/applypull?" + queryString(&opts)
+	return c.stream("POST", path, true, opts.RawJSONStream, headers, nil, opts.OutputStream, nil)
+}
+
+func (c *Client) DiffImageAndApply(opts MergeImageOptions) error {
+	if opts.Repository == "" {
+		return ErrNoSuchImage
+	}
+	if opts.Container == "" || opts.CurrentImage == "" {
+		return fmt.Errorf("missing container ID or Image")
+	}
+
+	path := "/images/applydiff?" + queryString(&opts)
+
+	return c.stream("POST", path, true, opts.RawJSONStream, nil, nil, opts.OutputStream, nil)
+}
