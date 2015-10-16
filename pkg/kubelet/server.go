@@ -75,6 +75,7 @@ type HostInterface interface {
 	PushImage(params *PushImageParams) error
 	UpdatePodCgroup(podFullName string, podConfig *PodConfig) error
 	UpdatePodDisk(podFullName string, podConfig *PodConfig) error
+	UpdatePodConfig(podFullName string, attribute []KVPair) error
 	GetPodStats(podFullName string) (*info.ContainerInfo, error)
 	MergeContainer(podFullName, image, op string) error
 }
@@ -683,6 +684,42 @@ func (s *Server) handlePodUpgrade(w http.ResponseWriter, req *http.Request) {
 			},
 		})
 		if err = s.host.MergeContainer(podFullName, tmp.Image, tmp.Op); err != nil {
+			result.Code = 1
+			result.ErrorMsg = fmt.Sprintf("%v", err)
+		}
+	case "config":
+		var setData struct {
+			PodID        string   `json:"podID"`
+			PodNamespace string   `json:"podNamespace"`
+			Attribute    []KVPair `json:"attribute"`
+		}
+		if err = json.Unmarshal(body, &setData); err != nil {
+			s.error(w, err)
+			return
+		}
+		if len(setData.PodID) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			http.Error(w, "Missing 'podID' post entry.", http.StatusBadRequest)
+			return
+		}
+		if len(setData.PodNamespace) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			http.Error(w, "Missing 'podNamespace' post entry.", http.StatusBadRequest)
+			return
+		}
+		if len(setData.Attribute) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			http.Error(w, "Missing 'Attribute' post entry.", http.StatusBadRequest)
+			return
+		}
+		podFullName := GetPodFullName(&api.BoundPod{
+			ObjectMeta: api.ObjectMeta{
+				Name:        setData.PodID,
+				Namespace:   setData.PodNamespace,
+				Annotations: map[string]string{ConfigSourceAnnotationKey: "etcd"},
+			},
+		})
+		if err = s.host.UpdatePodConfig(podFullName, setData.Attribute); err != nil {
 			result.Code = 1
 			result.ErrorMsg = fmt.Sprintf("%v", err)
 		}

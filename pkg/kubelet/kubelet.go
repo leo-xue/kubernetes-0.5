@@ -1644,14 +1644,6 @@ func (kl *Kubelet) PushImage(params *PushImageParams) error {
 		return err
 	}
 	glog.V(3).Info("Push successfully")
-
-	// update docker container info
-	var conf []docker.KeyValuePair
-	conf = append(conf, docker.KeyValuePair{Key: "image", Value: params.Image})
-	if err = kl.dockerClient.UpdateContainerConfig(containerID, conf); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -1902,6 +1894,46 @@ func (kl *Kubelet) UpdatePodDisk(podFullName string, podConfig *PodConfig) error
 	return nil
 }
 
+func (kl *Kubelet) UpdatePodConfig(podFullName string, attribute []KVPair) error {
+	var (
+		err    error
+		pod    *api.BoundPod
+		config []docker.KeyValuePair
+	)
+
+	for i, size := 0, len(kl.pods); i < size; i++ {
+		p := &kl.pods[i]
+		if GetPodFullName(p) == podFullName {
+			pod = p
+			break
+		}
+	}
+	if pod == nil {
+		glog.Errorf("Can't find pod: %s", podFullName)
+		return dockertools.ErrNoContainersInPod
+	}
+	dockerContainers, err := dockertools.GetKubeletDockerContainers(kl.dockerClient, false)
+	if err != nil {
+		glog.Errorf("Error listing containers: %#v", dockerContainers)
+		return err
+	}
+
+	for _, attr := range attribute {
+		config = append(config, docker.KeyValuePair{Key: attr.Key, Value: attr.Value})
+	}
+	glog.V(3).Infof("Update container config: %v ", config)
+
+	for _, container := range pod.Spec.Containers {
+		if dockerContainer, found, _ := dockerContainers.FindPodContainer(podFullName, pod.UID, container.Name); found {
+			if err = kl.dockerClient.UpdateContainerConfig(dockerContainer.ID, config); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 // Get pod stats and spec info
 // TODO(hbo)
 func (kl *Kubelet) GetPodStats(podFullName string) (*info.ContainerInfo, error) {
@@ -1998,13 +2030,6 @@ func (kl *Kubelet) MergeContainer(podFullName, image, op string) error {
 				}
 			} else {
 				return fmt.Errorf("Parameter error: op => %s", op)
-			}
-			// update docker container info
-			var conf []docker.KeyValuePair
-			conf = append(conf, docker.KeyValuePair{Key: "image", Value: image})
-			glog.V(3).Infof("Update container config: %v ", conf)
-			if err = kl.dockerClient.UpdateContainerConfig(dockerContainer.ID, conf); err != nil {
-				return err
 			}
 		}
 	}
