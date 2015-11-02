@@ -78,6 +78,7 @@ type HostInterface interface {
 	UpdatePodConfig(podFullName string, attribute []KVPair) error
 	GetPodStats(podFullName string) (*info.ContainerInfo, error)
 	MergeContainer(podFullName, image, op string) error
+	DockerPodCgroup(podFullName string, cgroups []CgroupData) ([]CgroupResponse, error)
 }
 
 // NewServer initializes and configures a kubelet.Server object to handle HTTP requests.
@@ -104,6 +105,7 @@ func (s *Server) InstallDefaultHandlers() {
 	s.mux.HandleFunc("/podOp", s.handlePodOp)
 	s.mux.HandleFunc("/image/", s.handleImage)
 	s.mux.HandleFunc("/podUpgrade/", s.handlePodUpgrade)
+	s.mux.HandleFunc("/podCgroup", s.handlePodCgroup)
 }
 
 // InstallDeguggingHandlers registers the HTTP request patterns that serve logs or run commands/containers
@@ -521,7 +523,7 @@ func (s *Server) handleImage(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result := ImageOpResult{Op: method, Code: 0, ErrorMsg: "success"}
+	result := PodOpResult{Op: method, Code: 0, ErrorMsg: "success"}
 
 	switch method {
 	case "push":
@@ -726,6 +728,74 @@ func (s *Server) handlePodUpgrade(w http.ResponseWriter, req *http.Request) {
 	default:
 		s.error(w, fmt.Errorf("unknown method %s", method))
 		return
+	}
+
+	data, err := json.Marshal(result)
+	if err != nil {
+		s.error(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	//w.Header().Add("Content-type", "text/plain")
+	w.Header().Add("Content-type", "application/json")
+	w.Write(data)
+}
+
+// handlePodCgroup handles pod cgroup set or get;
+func (s *Server) handlePodCgroup(w http.ResponseWriter, req *http.Request) {
+	parts := strings.Split(path.Clean(req.URL.Path), "/")
+	if len(parts) < 2 {
+		s.error(w, fmt.Errorf("request url error: %s", req.URL.Path))
+		return
+	}
+	body, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		s.error(w, err)
+		return
+	}
+
+	result := ApiResponse{Code: 0, ErrorMsg: "success", Data: nil}
+	var podCgroup struct {
+		PodID        string       `json:"podID"`
+		PodNamespace string       `json:"podNamespace"`
+		Cgroups      []CgroupData `json:"cgroups"`
+	}
+
+	if err = json.Unmarshal(body, &podCgroup); err != nil {
+		s.error(w, err)
+		return
+	}
+	if len(podCgroup.PodID) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		http.Error(w, "Missing 'podID' post entry.", http.StatusBadRequest)
+		return
+	}
+	if len(podCgroup.PodNamespace) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		http.Error(w, "Missing 'podNamespace' post entry.", http.StatusBadRequest)
+		return
+	}
+	if len(podCgroup.Cgroups) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		http.Error(w, "Missing 'cgroup' post entry.", http.StatusBadRequest)
+		return
+	}
+
+	podFullName := GetPodFullName(&api.BoundPod{
+		ObjectMeta: api.ObjectMeta{
+			Name:        podCgroup.PodID,
+			Namespace:   podCgroup.PodNamespace,
+			Annotations: map[string]string{ConfigSourceAnnotationKey: "etcd"},
+		},
+	})
+	out, err := s.host.DockerPodCgroup(podFullName, podCgroup.Cgroups)
+	if err != nil {
+		result.Code = 1
+		result.ErrorMsg = err.Error()
+	} else {
+		for _, obj := range out {
+			result.Data = append(result.Data, obj)
+		}
 	}
 
 	data, err := json.Marshal(result)

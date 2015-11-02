@@ -231,7 +231,7 @@ func (f *FakeDockerPuller) IsImagePresent(name string) (bool, error) {
 
 // UpdateContainerCgroup is a test-spy implementation of DockerInterface.UpdateContainerCgroup.
 // It adds an entry "update" to the internal method call record.
-func (f *FakeDockerClient) UpdateContainerCgroup(id string, cgroupConfig *docker.CgroupConfig) ([]docker.CgroupResponse, error) {
+func (f *FakeDockerClient) UpdateContainerCgroup(id string, conf []docker.KeyValuePair) ([]docker.CgroupResponse, error) {
 	f.Lock()
 	defer f.Unlock()
 	f.called = append(f.called, "update")

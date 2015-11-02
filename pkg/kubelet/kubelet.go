@@ -822,7 +822,7 @@ func (kl *Kubelet) syncPod(pod *api.BoundPod, dockerContainers dockertools.Docke
 		if err != nil {
 			glog.Errorf("Couldn't make a ref to pod %v, container %v: '%v'", pod.Name, container.Name, err)
 		}
-		if !api.IsPullNever(container.ImagePullPolicy) {
+		if !api.IsPullNever(container.ImagePullPolicy) && !kl.checkLocalImage(container.Image) {
 			present, err := kl.dockerPuller.IsImagePresent(container.Image)
 			latest := dockertools.RequireLatestImage(container.Image)
 			if err != nil {
@@ -1349,7 +1349,7 @@ func (kl *Kubelet) syncPodHostNetwork(pod *api.BoundPod, dockerContainers docker
 		if err != nil {
 			glog.Errorf("Couldn't make a ref to pod %v, container %v: '%v'", pod.Name, container.Name, err)
 		}
-		if !api.IsPullNever(container.ImagePullPolicy) {
+		if !api.IsPullNever(container.ImagePullPolicy) && !kl.checkLocalImage(container.Image) {
 			present, err := kl.dockerPuller.IsImagePresent(container.Image)
 			latest := dockertools.RequireLatestImage(container.Image)
 			if err != nil {
@@ -1820,9 +1820,7 @@ func (kl *Kubelet) UpdatePodCgroup(podFullName string, podConfig *PodConfig) err
 
 	for _, container := range pod.Spec.Containers {
 		if dockerContainer, found, _ := dockerContainers.FindPodContainer(podFullName, pod.UID, container.Name); found {
-			resp, err := kl.dockerClient.UpdateContainerCgroup(dockerContainer.ID, &docker.CgroupConfig{
-				WriteSubsystem: writeSubsystem,
-			})
+			resp, err := kl.dockerClient.UpdateContainerCgroup(dockerContainer.ID, writeSubsystem)
 
 			glog.V(3).Infof("Update container(%s - %s) cgroup: %+v\n\t result:%+v", container.Name, dockerContainer.ID, writeSubsystem, resp)
 
@@ -1962,7 +1960,7 @@ func (kl *Kubelet) GetPodStats(podFullName string) (*info.ContainerInfo, error) 
 
 	for _, container := range pod.Spec.Containers {
 		if dockerContainer, found, _ := dockerContainers.FindPodContainer(podFullName, pod.UID, container.Name); found {
-			cinfo, err = dockertools.GetDockerContainerStats(dockerContainer.ID)
+			cinfo, err = docker.GetContainerInfo(dockerContainer.ID)
 			if err != nil {
 				glog.Errorf("Get container %s stats error: %v", dockerContainer.ID, err)
 				return nil, err
@@ -2034,6 +2032,77 @@ func (kl *Kubelet) MergeContainer(podFullName, image, op string) error {
 		}
 	}
 	return nil
+}
+
+func (kl *Kubelet) DockerPodCgroup(podFullName string, cgroups []CgroupData) ([]CgroupResponse, error) {
+	var (
+		err    error
+		pod    *api.BoundPod
+		data   []docker.CgroupData
+		result []CgroupResponse
+	)
+
+	for i, size := 0, len(kl.pods); i < size; i++ {
+		p := &kl.pods[i]
+		if GetPodFullName(p) == podFullName {
+			pod = p
+			break
+		}
+	}
+	if pod == nil {
+		glog.Errorf("Can't find pod: %s", podFullName)
+		return nil, dockertools.ErrNoContainersInPod
+	}
+	dockerContainers, err := dockertools.GetKubeletDockerContainers(kl.dockerClient, false)
+	if err != nil {
+		glog.Errorf("Error listing containers: %#v", dockerContainers)
+		return nil, err
+	}
+
+	for _, v := range cgroups {
+		data = append(data, docker.CgroupData{
+			Group:     v.Group,
+			Subsystem: v.Subsystem,
+			Value:     v.Value,
+		})
+	}
+
+	for _, container := range pod.Spec.Containers {
+		if dockerContainer, found, _ := dockerContainers.FindPodContainer(podFullName, pod.UID, container.Name); found {
+			resp, err := docker.ContainerCgroup(dockerContainer.ID, data)
+			if err != nil {
+				glog.Errorf("Set or Get container %s cgroup error: %v", dockerContainer.ID, err)
+			}
+			for _, v := range resp {
+				result = append(result, CgroupResponse{
+					Group:     v.Group,
+					Subsystem: v.Subsystem,
+					Out:       v.Out,
+					Status:    v.Status,
+				})
+			}
+		}
+	}
+
+	return result, nil
+}
+
+func (kl *Kubelet) checkLocalImage(image string) bool {
+	var retries = 5
+	for i := 1; i <= retries; i++ {
+		glog.V(3).Infof("Inspect image [retries: %d]", i)
+		_, err := kl.dockerClient.InspectImage(image)
+		if err != nil && (err.Error() == "no such image" || i == retries) {
+			glog.Warningf("Can't find image: %s. error: %v", image, err)
+			return false
+		} else if err != nil {
+			time.Sleep(time.Duration(i) * 500 * time.Millisecond)
+			continue
+		} else {
+			break
+		}
+	}
+	return true
 }
 
 // The comparison of container, to determine whether to auto restart container

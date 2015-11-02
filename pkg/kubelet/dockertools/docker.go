@@ -34,7 +34,6 @@ import (
 	"github.com/GoogleCloudPlatform/kubernetes/pkg/util"
 	docker "github.com/fsouza/go-dockerclient"
 	"github.com/golang/glog"
-	"github.com/google/cadvisor/info"
 )
 
 // DockerInterface is an abstract interface for testability.  It abstracts the interface of docker.Client.
@@ -53,7 +52,7 @@ type DockerInterface interface {
 	Version() (*docker.Env, error)
 	CreateExec(docker.CreateExecOptions) (*docker.Exec, error)
 	StartExec(string, docker.StartExecOptions) error
-	UpdateContainerCgroup(id string, cgroupConfig *docker.CgroupConfig) ([]docker.CgroupResponse, error)
+	UpdateContainerCgroup(id string, conf []docker.KeyValuePair) ([]docker.CgroupResponse, error)
 	UpdateContainerConfig(id string, conf []docker.KeyValuePair) error
 	PullImageAndApply(opts docker.MergeImageOptions, auth docker.AuthConfiguration) error
 	DiffImageAndApply(opts docker.MergeImageOptions) error
@@ -621,9 +620,3 @@ func ParseImageName(image string) (string, string, string) {
 type ContainerCommandRunner interface {
 	RunInContainer(containerID string, cmd []string) ([]byte, error)
 }
-
-// Get docker container memory cgroup stats
-func GetDockerContainerStats(containerID string) (*info.ContainerInfo, error) {
-	return docker.GetContainerInfo(containerID)
-}
-

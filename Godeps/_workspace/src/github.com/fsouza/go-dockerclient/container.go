@@ -730,24 +730,14 @@ func (err *ContainerNotRunning) Error() string {
 	return "Container not running: " + err.ID
 }
 
-// Update container cgroup, like cpuset.cpus\memory.limit_in_bytes
-type CgroupConfig struct {
-	WriteSubsystem []KeyValuePair `json:"WriteSubsystem,omitempty" yaml:"WriteSubsystem,omitempty"`
-}
-
-type CgroupResponse struct {
-	Subsystem string `json:"subsystem,omitempty" yaml:"subsystem,omitempty"`
-	Out       string `json:"out,omitempty" yaml:"out,omitempty"`
-	Err       string `json:"err,omitempty" yaml:"err,omitempty"`
-	Status    int    `json:"status,omitempty" yaml:"status,omitempty"`
-}
-
-func (c *Client) UpdateContainerCgroup(id string, cgroupConfig *CgroupConfig) ([]CgroupResponse, error) {
-	if cgroupConfig == nil {
-		return nil, fmt.Errorf("CgroupConfig is nil: %v", cgroupConfig)
+func (c *Client) UpdateContainerCgroup(id string, conf []KeyValuePair) ([]CgroupResponse, error) {
+	if conf == nil {
+		return nil, fmt.Errorf("params conf is nil: %v", conf)
 	}
+	data := make(map[string][]KeyValuePair)
+	data["WriteSubsystem"] = conf
 	path := "/containers/" + id + "/cgroup?w=1"
-	body, status, err := c.do("POST", path, cgroupConfig)
+	body, status, err := c.do("POST", path, data)
 	if status == http.StatusNotFound {
 		return nil, &NoSuchContainer{ID: id}
 	}

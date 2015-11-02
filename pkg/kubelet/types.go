@@ -54,13 +54,6 @@ type PodOpResult struct {
 	ErrorMsg string `json:"errorMsg"`
 }
 
-// PushImageResult define push image result
-type ImageOpResult struct {
-	Op       string `json:"op"`
-	Code     int    `json:"code"`
-	ErrorMsg string `json:"errorMsg"`
-}
-
 // PushImageParams define push image to local hub
 type PushImageParams struct {
 	PodID        string `json:"podID"`
@@ -79,6 +72,25 @@ type PodConfig struct {
 	PodID          string   `json:"podID"`
 	PodNamespace   string   `json:"podNamespace"`
 	WriteSubsystem []KVPair `json:"writeSubsystem"`
+}
+
+type CgroupData struct {
+	Group     string `json:"group,omitempty"`
+	Subsystem string `json:"subsystem,omitempty"`
+	Value     string `json:"value,omitempty"`
+}
+
+type CgroupResponse struct {
+	Group     string `json:"group,omitempty"`
+	Subsystem string `json:"subsystem,omitempty"`
+	Out       string `json:"out,omitempty"`
+	Status    int    `json:"status"`
+}
+
+type ApiResponse struct {
+	Code     int           `json:"code"`
+	ErrorMsg string        `json:"errorMsg"`
+	Data     []interface{} `json:"data"`
 }
 
 // GetPodFullName returns a name that uniquely identifies a pod across all config sources.
