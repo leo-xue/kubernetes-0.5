@@ -19,7 +19,9 @@ package util
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
+	"os"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -175,4 +177,20 @@ func HexCpuSet(cpuSet string) (string, error) {
 	}
 
 	return strconv.FormatUint(value, 16), nil
+}
+
+// Check dir if empty
+func IsEmptyDir(name string) (bool, error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	_, err = f.Readdir(1)
+	if err == io.EOF {
+		return true, nil
+	}
+
+	return false, err
 }

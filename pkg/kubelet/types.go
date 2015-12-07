@@ -56,10 +56,12 @@ type PodOpResult struct {
 
 // PushImageParams define push image to local hub
 type PushImageParams struct {
-	PodID        string `json:"podID"`
-	PodNamespace string `json:"podNamespace"`
-	Image        string `json:"image"`
-	Author       string `json:"author"`
+	PodID        string   `json:"podID"`
+	PodNamespace string   `json:"podNamespace"`
+	Image        string   `json:"image"`
+	Author       string   `json:"author"`
+	PathType     string   `json:"pathType"`
+	PathContent  []string `json:"pathContent"`
 }
 
 type KVPair struct {

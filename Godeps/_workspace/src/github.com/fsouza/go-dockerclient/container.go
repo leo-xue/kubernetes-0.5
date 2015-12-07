@@ -563,6 +563,11 @@ func (c *Client) WaitContainer(id string) (int, error) {
 // CommitContainerOptions aggregates parameters to the CommitContainer method.
 //
 // See http://goo.gl/Jn8pe8 for more details.
+type ChangeOptions struct {
+	Includes []string
+	Excludes []string
+}
+
 type CommitContainerOptions struct {
 	Container  string
 	Repository string `qs:"repo"`
@@ -570,6 +575,7 @@ type CommitContainerOptions struct {
 	Message    string `qs:"m"`
 	Author     string
 	Run        *Config `qs:"-"`
+	Options    *ChangeOptions
 }
 
 // CommitContainer creates a new image from a container's changes.
@@ -577,7 +583,8 @@ type CommitContainerOptions struct {
 // See http://goo.gl/Jn8pe8 for more details.
 func (c *Client) CommitContainer(opts CommitContainerOptions) (*Image, error) {
 	path := "/commit?" + queryString(opts)
-	body, status, err := c.do("POST", path, opts.Run)
+	//	body, status, err := c.do("POST", path, opts.Run)
+	body, status, err := c.do("POST", path, map[string]*ChangeOptions{"changeOptions": opts.Options})
 	if status == http.StatusNotFound {
 		return nil, &NoSuchContainer{ID: opts.Container}
 	}

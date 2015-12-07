@@ -1171,6 +1171,19 @@ func (kl *Kubelet) setupNetwork(id dockertools.DockerID, pod *api.BoundPod) (str
 		if network.VlanID > 0 {
 			vlanID = network.VlanID
 		}
+		// check net device if exist
+		retries := 35 
+		for i := 1; i <= retries; i++ {
+			empty, err := util.IsEmptyDir(fmt.Sprintf("/sys/class/net/%s/device/virtfn%s/net", defaultDevice, network.VfID))
+			if (err != nil || empty) && i == retries {
+				return "", err
+			} else if err != nil || empty {
+				time.Sleep(time.Duration(i) * 1000 * time.Millisecond)
+				continue
+			} else {
+				break
+			}
+		}
 		execCmd = append([]string{defaultDevice, "--vf", network.VfID, string(id), ipAndGw, fmt.Sprintf("%s@%d", network.MacAddress, vlanID)})
 		break
 	case bridgeMode:
@@ -1554,6 +1567,7 @@ func (kl *Kubelet) PushImage(params *PushImageParams) error {
 	var (
 		pod         *api.BoundPod
 		containerID string
+		options     *docker.ChangeOptions
 		err         error
 	)
 	// check image if exists
@@ -1563,6 +1577,22 @@ func (kl *Kubelet) PushImage(params *PushImageParams) error {
 	}
 	if err.Error() != "no such image" {
 		return fmt.Errorf("Failed to inspect image: %s", params.Image)
+	}
+
+	// get change options
+	if params.PathType != "" {
+		switch params.PathType {
+		case "exclude":
+			options = &docker.ChangeOptions{
+				Excludes: params.PathContent,
+			}
+		case "include":
+			options = &docker.ChangeOptions{
+				Includes: params.PathContent,
+			}
+		default:
+			return fmt.Errorf("pathType must be 'exclude' or 'include'")
+		}
 	}
 
 	// get container id
@@ -1605,7 +1635,7 @@ func (kl *Kubelet) PushImage(params *PushImageParams) error {
 		}
 	}
 
-	glog.V(3).Infof("Commit containerID: %s", containerID)
+	glog.V(3).Infof("Commit containerID: %s; change options: %v", containerID, options)
 	// data.image e.g. hub.oa.com/library/tlinux1.2:latest
 	// after parse,result is:
 	// regi:	hub.oa.com
@@ -1620,6 +1650,7 @@ func (kl *Kubelet) PushImage(params *PushImageParams) error {
 		Tag:        tag,
 		Author:     params.Author,
 		Message:    "push custom image",
+		Options:    options,
 	}
 	_, err = kl.dockerClient.CommitContainer(containerOpts)
 	if err != nil {
